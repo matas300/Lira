@@ -4,6 +4,7 @@ import { eq, asc } from 'drizzle-orm';
 import type { Db } from '../db/client';
 import { users, profiles } from '../db/schema';
 import { hashPassword } from './password';
+import { deleteAllSessionsForUser } from './session';
 
 export async function findUserByEmail(db: Db, emailLower: string) {
   const [u] = await db.select().from(users).where(eq(users.email, emailLower)).limit(1);
@@ -41,4 +42,13 @@ export async function createUserWithDefaultProfile(params: {
   });
 
   return { userId, profileId };
+}
+
+export async function resetPassword(db: Db, email: string, newPassword: string): Promise<void> {
+  const emailLower = email.toLowerCase().trim();
+  const user = await findUserByEmail(db, emailLower);
+  if (!user) throw new Error(`User not found: ${emailLower}`);
+  const passwordHash = await hashPassword(newPassword);
+  await db.update(users).set({ passwordHash }).where(eq(users.id, user.id));
+  await deleteAllSessionsForUser(db, user.id);
 }
