@@ -1,6 +1,6 @@
 // src/server/db/test-helper.ts
 import { migrate } from 'drizzle-orm/libsql/migrator';
-import { createDb, type Db } from './client.js';
+import { createDb, type Db } from './client';
 import type { Client } from '@libsql/client';
 
 export async function createTestDb(): Promise<{ db: Db; client: Client }> {

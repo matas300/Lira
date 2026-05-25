@@ -1,6 +1,6 @@
 import { createClient, type Client } from '@libsql/client';
 import { drizzle } from 'drizzle-orm/libsql';
-import * as schema from './schema.js';
+import * as schema from './schema';
 
 export type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -14,9 +14,19 @@ let cached: { db: Db; client: Client } | undefined;
 
 export function getDb(): Db {
   if (!cached) {
-    const url = process.env.DATABASE_URL ?? 'file:./local.db';
+    const url = process.env.DATABASE_URL;
+    if (!url) {
+      throw new Error('DATABASE_URL not set. Copia .env.example in .env e configura.');
+    }
     const authToken = process.env.DATABASE_AUTH_TOKEN || undefined;
     cached = createDb(url, authToken);
   }
   return cached.db;
+}
+
+export function closeDb(): void {
+  if (cached) {
+    cached.client.close();
+    cached = undefined;
+  }
 }

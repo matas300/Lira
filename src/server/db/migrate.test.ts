@@ -1,7 +1,7 @@
 // src/server/db/migrate.test.ts
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createTestDb } from './test-helper.js';
+import { createTestDb } from './test-helper';
 
 test('migrations creano tutte le tabelle attese', async () => {
   const { client } = await createTestDb();
