@@ -59,6 +59,23 @@ fly secrets set DATABASE_AUTH_TOKEN=...
 fly deploy
 ```
 
+## Claude Code — Superpowers
+
+Lira usa il plugin [obra/superpowers](https://github.com/obra/superpowers) per orchestrare lo sviluppo. È installazione user-level (non si può dichiarare come dependency di progetto), quindi al primo avvio di Claude Code nel progetto:
+
+```
+/plugin marketplace add obra/superpowers-marketplace
+/plugin install superpowers@superpowers-marketplace
+```
+
+In alternativa via marketplace ufficiale:
+
+```
+/plugin install superpowers@claude-plugins-official
+```
+
+Comandi utili una volta installato: `/superpowers:brainstorm`, `/superpowers:write-plan`, `/superpowers:execute-plan`.
+
 ## Documenti
 
 - [`docs/architecture.md`](docs/architecture.md) — stack, runtime, flussi dati

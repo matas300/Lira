@@ -160,11 +160,24 @@ Vedi anche `src/shared/forfettario-rules.ts` e `docs/data-model.md`. Lista di ri
 
 ## Skills disponibili
 
-Eredità da CalcoliVari (in `.claude/skills/`):
+### Skills custom (committed in `.claude/skills/`, ereditate da CalcoliVari)
 - `auditor-fiscale-severo` — red team fiscale
 - `commercialista-fiscale` — simulatore P.IVA
 - `dichiarazione-forfettario` — motore LM/RR/F24
 - `fatturazione-creator` — consulente operativo fiscale
+
+### Superpowers (plugin user-level, va installato a parte)
+
+Lira usa anche il plugin [obra/superpowers](https://github.com/obra/superpowers). **Non è una project dependency**: ogni utente lo installa user-side al primo accesso al progetto.
+
+```
+/plugin marketplace add obra/superpowers-marketplace
+/plugin install superpowers@superpowers-marketplace
+```
+
+Una volta installato, Claude Code orchestra automaticamente le sue skills (brainstorming, planning, execute-plan, ecc.). Per Lira è particolarmente utile in: fase di brainstorming pre-implementazione (`/superpowers:brainstorm`), generazione del piano di implementazione (`/superpowers:write-plan`), e esecuzione disciplinata (`/superpowers:execute-plan`).
+
+**Convenzione di workflow per Lira:** per ogni feature non banale (es. nuovo modulo Fatture, motore tax-engine, importer legacy), seguire il ciclo Superpowers: brainstorm → write-plan → execute-plan. Le skill fiscali custom (auditor, commercialista) restano invocabili in qualsiasi punto via `Skill` tool.
 
 ## Stato attuale (2026-05-25)
 
