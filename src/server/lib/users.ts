@@ -52,3 +52,18 @@ export async function resetPassword(db: Db, email: string, newPassword: string):
   await db.update(users).set({ passwordHash }).where(eq(users.id, user.id));
   await deleteAllSessionsForUser(db, user.id);
 }
+
+export async function createProfileForUser(
+  db: Db,
+  email: string,
+  slug: string,
+  displayName: string,
+) {
+  const emailLower = email.toLowerCase().trim();
+  const user = await findUserByEmail(db, emailLower);
+  if (!user) throw new Error(`User not found: ${emailLower}`);
+  const id = randomUUID();
+  await db.insert(profiles).values({ id, userId: user.id, slug, displayName });
+  const [created] = await db.select().from(profiles).where(eq(profiles.id, id)).limit(1);
+  return created!;
+}
