@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { sqliteTable, text, integer, real, primaryKey, uniqueIndex, index } from 'drizzle-orm/sqlite-core';
+import type { AnySQLiteColumn } from 'drizzle-orm/sqlite-core';
 
 const nowIso = sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`;
 
@@ -19,7 +20,7 @@ export const sessions = sqliteTable(
   {
     id: text('id').primaryKey(),
     userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-    activeProfileId: text('active_profile_id').notNull(),
+    activeProfileId: text('active_profile_id').notNull().references(() => profiles.id, { onDelete: 'cascade' }),
     expiresAt: text('expires_at').notNull(),
     createdAt: text('created_at').notNull().default(nowIso),
     lastUsedAt: text('last_used_at').notNull().default(nowIso),
@@ -133,7 +134,7 @@ export const fatture = sqliteTable(
     pagMese: integer('pag_mese'),
     pagAnno: integer('pag_anno'),
     modalitaPagamento: text('modalita_pagamento'),
-    fatturaOriginaleId: text('fattura_originale_id'),
+    fatturaOriginaleId: text('fattura_originale_id').references((): AnySQLiteColumn => fatture.id, { onDelete: 'set null' }),
     tipoStorno: text('tipo_storno'),
     ncTotaleImporto: real('nc_totale_importo').notNull().default(0),
     ncIds: text('nc_ids'), // JSON
