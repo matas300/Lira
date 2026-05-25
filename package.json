@@ -16,7 +16,7 @@
     "db:migrate": "tsx --env-file=.env src/server/db/migrate.ts",
     "db:studio": "drizzle-kit studio",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test src",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "lint": "echo 'no linter configured'",
     "create-user": "tsx --env-file=.env scripts/create-user.ts",
     "reset-password": "tsx --env-file=.env scripts/reset-password.ts",
