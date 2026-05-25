@@ -1,84 +1,78 @@
 # Lira
 
-Web app per Partita IVA italiana — successore di [CalcoliVari](https://github.com/matas300/CalcoliVari).
+App fullstack per Partita IVA italiana — successore di CalcoliVari.
 
-> **Stato:** scaffold iniziale (2026-05-25). CalcoliVari resta in produzione finché Lira non è completa.
+Vedi [`CLAUDE.md`](./CLAUDE.md) per panoramica completa, [`docs/architecture.md`](./docs/architecture.md) per il runtime, [`docs/data-model.md`](./docs/data-model.md) per lo schema.
 
-## Architettura
-
-- **Backend**: Node 22 + Hono + Drizzle ORM
-- **Database**: Turso (libSQL/SQLite remoto, free tier ~9GB)
-- **Frontend**: Vite + TypeScript vanilla (no framework, dark theme portato da CalcoliVari)
-- **Auth**: cookie sessions HTTP-only + Argon2id (no JWT)
-- **Validation**: Zod (schemi condivisi server/client)
-- **Deploy**: Docker su Fly.io (shared-1x-cpu @ 512MB)
-
-## Setup locale
+## Primo setup (dev locale)
 
 ```bash
-# 1. Dipendenze
+# 1. Installa dipendenze
 npm install
 
-# 2. Variabili d'ambiente
+# 2. Configura env (dev locale usa SQLite file)
 cp .env.example .env
-# poi compila SESSION_SECRET, DATABASE_URL, DATABASE_AUTH_TOKEN
+# .env è già pronto con DATABASE_URL=file:./local.db
 
-# 3. Database (dev locale: SQLite file)
-# - DATABASE_URL=file:local.db   per sviluppo offline
-# - DATABASE_URL=libsql://...    per Turso cloud
-npm run db:generate    # crea migrations da schema.ts
-npm run db:migrate     # applica migrations
+# 3. Applica migrations
+npm run db:migrate
 
-# 4. Dev (server + frontend hot reload in parallelo)
+# 4. Crea il primo utente + profilo default (in transazione)
+npm run create-user -- matas300@gmail.com 'PasswordSicuraQui' 'Mattia'
+
+# 5. (Opzionale) Aggiungi un secondo profilo allo stesso utente
+npm run create-profile -- matas300@gmail.com peru 'Peru'
+
+# 6. Avvia dev server (Hono + Vite)
 npm run dev
+# → web: http://localhost:5173
+# → api: http://localhost:8787
 ```
 
-Server: http://localhost:8787 — Frontend: http://localhost:5173 (proxied su `/api/*`).
+## Primo setup (Turso remoto)
 
-## Comandi utili
-
-| Comando | Descrizione |
-|---|---|
-| `npm run dev` | Server + Vite in parallelo |
-| `npm run build` | Build production (client + server) |
-| `npm start` | Avvia il bundle di produzione |
-| `npm run typecheck` | TypeScript strict check |
-| `npm test` | Test runner nativo Node |
-| `npm run db:generate` | Genera SQL migrations da `schema.ts` |
-| `npm run db:migrate` | Applica migrations sul DB target |
-| `npm run db:studio` | UI Drizzle Studio |
-| `npm run import:legacy` | Importa JSON export di CalcoliVari |
-
-## Deploy
+Solo se vuoi puntare a un DB remoto in dev/staging/prod.
 
 ```bash
-fly launch --no-deploy
-fly secrets set SESSION_SECRET=...
-fly secrets set DATABASE_URL=libsql://...
-fly secrets set DATABASE_AUTH_TOKEN=...
-fly deploy
+# Installa Turso CLI (una tantum)
+curl -sSfL https://get.tur.so/install.sh | bash
+turso auth login
+
+# Crea DB
+turso db create lira-prod --location fra
+turso db tokens create lira-prod --expiration none
+# Output → copia in .env:
+# DATABASE_URL=libsql://lira-prod-<org>.turso.io
+# DATABASE_AUTH_TOKEN=<jwt>
+
+npm run db:migrate
+npm run create-user -- ...
 ```
 
-## Claude Code — Superpowers
+## CLI admin
 
-Lira usa il plugin [obra/superpowers](https://github.com/obra/superpowers) per orchestrare lo sviluppo. È installazione user-level (non si può dichiarare come dependency di progetto), quindi al primo avvio di Claude Code nel progetto:
+| Comando | Cosa fa |
+|---|---|
+| `npm run create-user -- <email> <password> [name]` | Crea user + profilo `default` in una transazione |
+| `npm run create-profile -- <email> <slug> <displayName>` | Aggiunge un profilo a un user esistente |
+| `npm run reset-password -- <email> <newPassword>` | Resetta la password e invalida tutte le sessioni dell'utente |
 
+Non esiste un endpoint HTTP pubblico per creare/registrare utenti: l'app è privata.
+
+## Test
+
+```bash
+npm test           # tutti i test (integration + unit)
+npm run typecheck  # tsc --noEmit
 ```
-/plugin marketplace add obra/superpowers-marketplace
-/plugin install superpowers@superpowers-marketplace
+
+## Build produzione
+
+```bash
+npm run build      # build:web (Vite) + build:server (tsc)
+npm start          # node dist/server/index.js
 ```
 
-In alternativa via marketplace ufficiale:
+## Stack
 
-```
-/plugin install superpowers@claude-plugins-official
-```
-
-Comandi utili una volta installato: `/superpowers:brainstorm`, `/superpowers:write-plan`, `/superpowers:execute-plan`.
-
-## Documenti
-
-- [`docs/architecture.md`](docs/architecture.md) — stack, runtime, flussi dati
-- [`docs/data-model.md`](docs/data-model.md) — schema DB + scelte di design
-- [`docs/migration-plan.md`](docs/migration-plan.md) — roadmap da CalcoliVari
-- [`CLAUDE.md`](CLAUDE.md) — guida per Claude Code (contesto progetto)
+Vedi `docs/architecture.md`. Riassunto: Vite + TS vanilla → Hono (Node 22) → Drizzle → libSQL (file:// o Turso). Cookie sessions HTTP-only + Argon2id. Deploy target: Fly.io 512MB.
