@@ -16,15 +16,18 @@
     "db:migrate": "tsx --env-file=.env src/server/db/migrate.ts",
     "db:studio": "drizzle-kit studio",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --import tsx src/**/*.test.ts",
+    "test": "node --import tsx --test src",
     "lint": "echo 'no linter configured'",
+    "create-user": "tsx --env-file=.env scripts/create-user.ts",
+    "reset-password": "tsx --env-file=.env scripts/reset-password.ts",
+    "create-profile": "tsx --env-file=.env scripts/create-profile.ts",
     "import:legacy": "tsx --env-file=.env scripts/import-from-calcolivari.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",
     "@hono/zod-validator": "^0.4.1",
     "@libsql/client": "^0.14.0",
-    "argon2": "^0.41.1",
+    "@node-rs/argon2": "^2.0.2",
     "drizzle-orm": "^0.36.4",
     "hono": "^4.6.12",
     "zod": "^3.23.8"
