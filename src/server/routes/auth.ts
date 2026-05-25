@@ -94,3 +94,7 @@ authRoute.get('/me', requireSession, async (c) => {
   const db = c.get('db');
   return c.json(await mePayload(db, c.get('userId'), c.get('activeProfileId')));
 });
+
+export async function initAuthRoute(): Promise<void> {
+  await getDummyHash();
+}

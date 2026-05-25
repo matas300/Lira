@@ -1,6 +1,6 @@
 // src/server/lib/users.ts
 import { randomUUID } from 'node:crypto';
-import { eq } from 'drizzle-orm';
+import { eq, asc } from 'drizzle-orm';
 import type { Db } from '../db/client';
 import { users, profiles } from '../db/schema';
 import { hashPassword } from './password';
@@ -11,7 +11,7 @@ export async function findUserByEmail(db: Db, emailLower: string) {
 }
 
 export async function listProfilesForUser(db: Db, userId: string) {
-  return db.select().from(profiles).where(eq(profiles.userId, userId));
+  return db.select().from(profiles).where(eq(profiles.userId, userId)).orderBy(asc(profiles.createdAt));
 }
 
 export async function createUserWithDefaultProfile(params: {
