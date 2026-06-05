@@ -3,6 +3,7 @@
 // Server-authoritative (vedi CLAUDE.md §Architettura) — il client può precalcolare,
 // ma la verità fiscale risiede qui.
 import { ACCONTO_RULES, type AccontoRules } from '@shared/acconto-rules';
+import type { ScheduleFamily } from '@shared/schedule-keys';
 
 export interface AccontoPlan {
   base: number;
@@ -378,6 +379,93 @@ export function buildForfettarioMethodComparison(input: ComparisonInput): Compar
     transition,
     warnings,
   };
+}
+
+// --- buildInstallmentStatus + buildInstallmentExplanation (Task 13) ------
+
+export interface ScheduleRow {
+  id: string;
+  family: ScheduleFamily;
+  kind: 'tax' | 'contribution' | 'other';
+  competence: string;
+  title: string;
+  method: string;
+  amount: number;
+  low: number;
+  high: number;
+  certainty: 'official' | 'estimated' | 'forecast';
+  note?: string;
+}
+
+export interface InstallmentStatus {
+  code: 'paid' | 'underpaid' | 'overpaid' | 'estimated' | 'to_confirm';
+  label: string;
+  tone: 'ok' | 'warn' | 'danger' | 'info';
+}
+
+/**
+ * Determina lo stato di un installment in base al totale realmente pagato e
+ * al range stimato (`low`/`high`) della riga.
+ *
+ * Port da `CalcoliVari/tax-engine.js:644-655`, con due differenze:
+ * - lavora su `paidTotal: number` (somma dei linked payments) invece che su
+ *   singolo `linkedPayment`, per allinearsi al modello Lira (più pagamenti
+ *   parziali possono insistere sulla stessa rata).
+ * - Mantiene la semantica di tono per il rendering UI.
+ *
+ * Regole:
+ * - `paidTotal > 0` → confronto col range `[low, high]` (default `amount` se
+ *   non specificati): `underpaid` / `paid` / `overpaid`.
+ * - `paidTotal === 0` → `estimated` se la riga ha `certainty === 'estimated'`,
+ *   altrimenti `to_confirm`.
+ */
+export function buildInstallmentStatus(row: ScheduleRow, paidTotal: number): InstallmentStatus {
+  if (paidTotal > 0) {
+    const paid = ceil2(paidTotal);
+    const low = ceil2(row.low ?? row.amount);
+    const high = ceil2(row.high ?? row.amount);
+    if (paid < low) return { code: 'underpaid', label: 'Sottostimato', tone: 'danger' };
+    if (paid > high) return { code: 'overpaid', label: 'Sovrastimato', tone: 'warn' };
+    return { code: 'paid', label: 'Pagato', tone: 'ok' };
+  }
+  if (row.certainty === 'estimated') {
+    return { code: 'estimated', label: 'Stimato', tone: 'warn' };
+  }
+  return { code: 'to_confirm', label: 'Da confermare', tone: 'info' };
+}
+
+/**
+ * Genera una spiegazione human-readable (IT) per la riga del calendario
+ * fiscale. Le regole sono basate sul tipo (`kind`), sulla competence e sul
+ * titolo della scadenza.
+ *
+ * Port da `CalcoliVari/tax-engine.js:657-681`, con adattamento di `kind` da
+ * 'tasse'/'contributi' a 'tax'/'contribution' (allineato alle Zod schemas
+ * Lira). Fallback finale: `row.note ?? ''`.
+ */
+export function buildInstallmentExplanation(row: ScheduleRow): string {
+  const competence = row.competence;
+  const title = row.title;
+
+  if (row.kind === 'tax' && /imposta sostitutiva/i.test(title) && /saldo/i.test(competence)) {
+    return `Questo importo chiude l'imposta sostitutiva dell'anno di riferimento indicato (${competence}).`;
+  }
+  if (row.kind === 'tax' && /imposta sostitutiva/i.test(title) && /acconto/i.test(competence)) {
+    return `Questo importo anticipa l'imposta sostitutiva futura ed è calcolato con metodo ${row.method.toLowerCase()}.`;
+  }
+  if (row.kind === 'contribution' && /rata/i.test(competence)) {
+    return 'Questa è una rata fissa INPS artigiani sul minimale.';
+  }
+  if (row.kind === 'contribution' && /saldo/i.test(competence)) {
+    return 'Questo è il saldo della quota contributiva eccedente il minimale.';
+  }
+  if (row.kind === 'contribution' && /acconto/i.test(competence)) {
+    return `Questo importo anticipa i contributi INPS eccedenti del periodo successivo con metodo ${row.method.toLowerCase()}.`;
+  }
+  if (/camera di commercio/i.test(title)) return 'Diritto annuale camerale dovuto per l\'anno in corso.';
+  if (/bollo/i.test(title)) return 'Imposta di bollo sulle fatture elettroniche.';
+  if (/inail/i.test(title)) return 'Autoliquidazione INAIL.';
+  return row.note ?? '';
 }
 
 // --- Helpers privati (non esportati) -------------------------------------

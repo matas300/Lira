@@ -6,7 +6,10 @@ import {
   buildForfettarioScenario,
   buildForfettarioMethodComparison,
   buildTransitionDiagnostics,
+  buildInstallmentStatus,
+  buildInstallmentExplanation,
   type ScenarioInput,
+  type ScheduleRow,
 } from './tax-engine';
 import { getInpsArtComForYear } from '@shared/inps-params';
 
@@ -210,4 +213,52 @@ test('buildForfettarioMethodComparison: warnings include un messaggio quando del
     forecastContributionBase: 100,
   });
   assert.ok(out.warnings.length > 0);
+});
+
+// --- buildInstallmentStatus + buildInstallmentExplanation (Task 13) -------
+
+function baseRow(overrides: Partial<ScheduleRow> = {}): ScheduleRow {
+  return {
+    id: 'imposta_saldo_2025',
+    family: 'imposta_saldo',
+    kind: 'tax',
+    competence: 'Saldo 2025',
+    title: 'Imposta sostitutiva - saldo',
+    method: 'Storico',
+    amount: 1000,
+    low: 1000,
+    high: 1000,
+    certainty: 'estimated',
+    ...overrides,
+  };
+}
+
+test('buildInstallmentStatus: nessun pagamento + estimated → estimated', () => {
+  const s = buildInstallmentStatus(baseRow({ certainty: 'estimated' }), 0);
+  assert.equal(s.code, 'estimated');
+});
+
+test('buildInstallmentStatus: nessun pagamento + non estimated → to_confirm', () => {
+  const s = buildInstallmentStatus(baseRow({ certainty: 'official' }), 0);
+  assert.equal(s.code, 'to_confirm');
+});
+
+test('buildInstallmentStatus: pagamento esatto → paid', () => {
+  const s = buildInstallmentStatus(baseRow(), 1000);
+  assert.equal(s.code, 'paid');
+});
+
+test('buildInstallmentStatus: pagamento sotto range → underpaid', () => {
+  const s = buildInstallmentStatus(baseRow({ amount: 1000, low: 900, high: 1100 }), 800);
+  assert.equal(s.code, 'underpaid');
+});
+
+test('buildInstallmentStatus: pagamento sopra range → overpaid', () => {
+  const s = buildInstallmentStatus(baseRow({ amount: 1000, low: 900, high: 1100 }), 1200);
+  assert.equal(s.code, 'overpaid');
+});
+
+test('buildInstallmentExplanation: imposta_saldo → menziona "chiude l\'imposta"', () => {
+  const ex = buildInstallmentExplanation(baseRow());
+  assert.match(ex, /chiude.*imposta/i);
 });
