@@ -71,6 +71,11 @@ export const yearSettings = sqliteTable(
     primoAnnoContribVariabiliPrec: real('primo_anno_contrib_variabili_prec'),
     primoAnnoAccontiContribPrec: real('primo_anno_acconti_contrib_prec'),
     overrides: text('overrides'), // JSON
+    // Audit fix A5: data proroga saldo+acc1 (es. '2026-07-30').
+    prorogaSaldoAt: text('proroga_saldo_at'),
+    // Audit fix M1: stato comunicazione INPS della riduzione 35%.
+    riduzione35Comunicata: integer('riduzione_35_comunicata').notNull().default(0),
+    riduzione35DataComunicazione: text('riduzione_35_data_comunicazione'),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.profileId, t.year] }),
