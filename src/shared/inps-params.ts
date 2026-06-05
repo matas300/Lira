@@ -22,7 +22,13 @@
 
 export interface InpsArtComParams {
   minimaleAnnuo: number;
+  // Quota fissa annua artigiano = minimale * 0.24 + 7.44 (contributo
+  // aggiuntivo fisso art. 5 L. 160/2019). Esempio 2025: 18555 * 0.24 + 7.44.
   quotaFissaAnnua: number;
+  // Quota fissa annua commerciante = minimale * 0.2448 + 7.44. Differisce
+  // da artigiano per la maggiorazione 0,48 p.p. (tassa scopi previdenziali
+  // INVS commercianti, art. 5 L. 160/2019).
+  quotaFissaAnnuaCommerciante: number;
   aliquota: number; // artigiano (0.24)
   aliquotaCommerciante: number; // commerciante (0.2448)
   massimale: number;
@@ -38,6 +44,7 @@ export const INPS_ARTCOM: Record<number, InpsArtComParams> = Object.freeze({
   2024: Object.freeze({
     minimaleAnnuo: 18415,
     quotaFissaAnnua: 4427.04,
+    quotaFissaAnnuaCommerciante: 4515.43,
     aliquota: 0.24,
     aliquotaCommerciante: 0.2448,
     massimale: 119650,
@@ -45,6 +52,7 @@ export const INPS_ARTCOM: Record<number, InpsArtComParams> = Object.freeze({
   2025: Object.freeze({
     minimaleAnnuo: 18555,
     quotaFissaAnnua: 4460.64,
+    quotaFissaAnnuaCommerciante: 4549.70,
     aliquota: 0.24,
     aliquotaCommerciante: 0.2448,
     massimale: 120607,

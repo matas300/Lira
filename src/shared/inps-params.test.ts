@@ -31,3 +31,10 @@ test('getInpsArtComForYear: anno valido → params', () => {
   const p = getInpsArtComForYear(2025);
   assert.equal(typeof p.minimaleAnnuo, 'number');
 });
+
+test('INPS_ARTCOM 2025: quotaFissaAnnuaCommerciante > quotaFissaAnnua (INVS surcharge)', () => {
+  const p = INPS_ARTCOM[2025];
+  assert.ok(p);
+  assert.ok(p.quotaFissaAnnuaCommerciante > p.quotaFissaAnnua, 'commerciante deve essere maggiore di artigiano');
+  assert.ok(p.quotaFissaAnnuaCommerciante < 5000);
+});
