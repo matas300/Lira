@@ -290,6 +290,96 @@ export function buildTransitionDiagnostics(input: TransitionInput): TransitionIn
   };
 }
 
+// --- buildForfettarioMethodComparison (Task 11 — port da CalcoliVari) ----
+
+export interface ComparisonInput extends ScenarioInput {
+  methodSetting: 'storico' | 'previsionale';
+  currentSettings?: { regime?: string; haRedditoDipendente?: number };
+  previousSettings?: { regime?: string; haRedditoDipendente?: number };
+}
+
+export interface ComparisonOutput {
+  selectedMethod: 'storico' | 'previsionale';
+  selected: ForfettarioScenario;
+  historical: ForfettarioScenario;
+  previsionale: ForfettarioScenario;
+  prudential: 'historical' | 'previsionale';
+  liquidity: 'historical' | 'previsionale';
+  deltaCash: number;
+  transition: TransitionInfo;
+  warnings: string[];
+}
+
+/**
+ * Confronta lo scenario forfettario con metodo `storico` e con metodo
+ * `previsionale`, indica quale dei due e prudenziale (maggiore liquidita
+ * impegnata) e quale e piu liquido, e aggrega i warning con quelli di
+ * `buildTransitionDiagnostics`.
+ *
+ * Port da `CalcoliVari/tax-engine.js:585-642`.
+ *
+ * - `selectedMethod` riflette la preferenza utente (`methodSetting`).
+ * - `prudential = 'historical'` quando `historical.managedCashOutflows >=
+ *   previsionale.managedCashOutflows` (tie-break sul prudenziale).
+ * - `liquidity` e sempre l'altro metodo.
+ * - `deltaCash = ceil2(historical.managedCashOutflows -
+ *   previsionale.managedCashOutflows)` e finisce nel warning solo se
+ *   `|deltaCash| >= 0.01`.
+ * - Warning aggiuntivo sul confronto fra `taxAcconti.total` dei due metodi.
+ */
+export function buildForfettarioMethodComparison(input: ComparisonInput): ComparisonOutput {
+  const historical = buildForfettarioScenario({ ...input, method: 'storico' });
+  const previsionale = buildForfettarioScenario({ ...input, method: 'previsionale' });
+
+  const selectedMethod: 'storico' | 'previsionale' =
+    input.methodSetting === 'previsionale' ? 'previsionale' : 'storico';
+  const selected = selectedMethod === 'previsionale' ? previsionale : historical;
+
+  const prudentialIsHistorical = historical.managedCashOutflows >= previsionale.managedCashOutflows;
+  const prudential: 'historical' | 'previsionale' = prudentialIsHistorical ? 'historical' : 'previsionale';
+  const liquidity: 'historical' | 'previsionale' = prudentialIsHistorical ? 'previsionale' : 'historical';
+
+  const deltaCash = ceil2(historical.managedCashOutflows - previsionale.managedCashOutflows);
+
+  const transition = buildTransitionDiagnostics({
+    year: input.year,
+    currentSettings: input.currentSettings ?? {},
+    previousSettings: input.previousSettings ?? {},
+  });
+
+  const warnings: string[] = [...transition.warnings];
+
+  if (Math.abs(deltaCash) >= 0.01) {
+    warnings.push(
+      deltaCash > 0
+        ? `Il metodo storico richiede ${deltaCash.toFixed(2)} EUR in piu di liquidita gestita rispetto al previsionale.`
+        : `Il metodo previsionale richiede ${Math.abs(deltaCash).toFixed(2)} EUR in piu di liquidita gestita rispetto allo storico.`,
+    );
+  }
+
+  if (historical.taxAcconti.total > previsionale.taxAcconti.total) {
+    warnings.push(
+      `Lo storico ti fa anticipare piu imposta sostitutiva del previsionale (${historical.taxAcconti.total.toFixed(2)} vs ${previsionale.taxAcconti.total.toFixed(2)}).`,
+    );
+  } else if (historical.taxAcconti.total < previsionale.taxAcconti.total) {
+    warnings.push(
+      `Il previsionale porta acconti imposta piu alti dello storico (${previsionale.taxAcconti.total.toFixed(2)} vs ${historical.taxAcconti.total.toFixed(2)}).`,
+    );
+  }
+
+  return {
+    selectedMethod,
+    selected,
+    historical,
+    previsionale,
+    prudential,
+    liquidity,
+    deltaCash,
+    transition,
+    warnings,
+  };
+}
+
 // --- Helpers privati (non esportati) -------------------------------------
 
 function ceil2(n: number): number {

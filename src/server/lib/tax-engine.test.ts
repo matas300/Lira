@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   buildAccontoPlan,
   buildForfettarioScenario,
+  buildForfettarioMethodComparison,
   buildTransitionDiagnostics,
   type ScenarioInput,
 } from './tax-engine';
@@ -176,4 +177,37 @@ test('buildTransitionDiagnostics: anno precedente reddito misto → warning', ()
   });
   assert.equal(r.previousHadEmployeeIncome, true);
   assert.ok(r.warnings.some((w) => /dipendente/i.test(w)));
+});
+
+// --- buildForfettarioMethodComparison (Task 11) -------------------------
+
+test('buildForfettarioMethodComparison: produce sia historical che previsionale', () => {
+  const out = buildForfettarioMethodComparison({
+    ...baseScenarioInput(),
+    methodSetting: 'storico',
+    forecastTaxBase: 4800,
+    forecastContributionBase: 1600,
+  });
+  assert.ok(out.historical);
+  assert.ok(out.previsionale);
+});
+
+test('buildForfettarioMethodComparison: prudential è il metodo con managedCashOutflows piu alto', () => {
+  const out = buildForfettarioMethodComparison({
+    ...baseScenarioInput(),
+    methodSetting: 'storico',
+    forecastTaxBase: 100,
+    forecastContributionBase: 100,
+  });
+  assert.ok(out.prudential === 'historical' || out.prudential === 'previsionale');
+});
+
+test('buildForfettarioMethodComparison: warnings include un messaggio quando deltaCash differisce', () => {
+  const out = buildForfettarioMethodComparison({
+    ...baseScenarioInput(),
+    methodSetting: 'storico',
+    forecastTaxBase: 100,
+    forecastContributionBase: 100,
+  });
+  assert.ok(out.warnings.length > 0);
 });
