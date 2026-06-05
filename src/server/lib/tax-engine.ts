@@ -217,6 +217,79 @@ export function buildForfettarioScenario(input: ScenarioInput): ForfettarioScena
   };
 }
 
+// --- buildTransitionDiagnostics (Task 12 — port da CalcoliVari) ----------
+
+export interface TransitionInput {
+  year: number;
+  currentSettings: { regime?: string; haRedditoDipendente?: number };
+  previousSettings: { regime?: string; haRedditoDipendente?: number };
+}
+
+export interface TransitionInfo {
+  year: number;
+  currentRegime: string;
+  previousRegime: string | null;
+  previousHadEmployeeIncome: boolean;
+  isRegimeTransition: boolean;
+  warnings: string[];
+  facts: string[];
+}
+
+/**
+ * Emette warning diagnostici sulle transizioni di regime e sulla presenza di
+ * redditi misti nell'anno precedente. Funzione pura, nessun IO.
+ *
+ * Port da `CalcoliVari/tax-engine.js:475-507`.
+ *
+ * Casi gestiti:
+ * - `previousHadEmployeeIncome` → lo storico include IRPEF/addizionali non
+ *   rappresentativi del forfettario puro.
+ * - `isRegimeTransition` → cambio regime tra anno precedente e corrente; gli
+ *   acconti storici possono essere prudenziali ma non ottimizzati.
+ * - transizione *verso* forfettario da altro regime → consiglio di confrontare
+ *   metodo storico e previsionale prima di assumere lo storico come migliore.
+ */
+export function buildTransitionDiagnostics(input: TransitionInput): TransitionInfo {
+  const year = input.year;
+  const currentRegime = input.currentSettings.regime ?? 'forfettario';
+  const previousRegime = input.previousSettings.regime ?? null;
+  const previousHadEmployeeIncome = (input.previousSettings.haRedditoDipendente ?? 0) === 1;
+  const isRegimeTransition = !!previousRegime && previousRegime !== currentRegime;
+
+  const warnings: string[] = [];
+  const facts: string[] = [];
+
+  if (previousHadEmployeeIncome) {
+    warnings.push(
+      `Nel ${year - 1} risultano anche redditi da lavoro dipendente: lo storico puo includere IRPEF e addizionali che non rappresentano il forfettario puro del ${year}.`,
+    );
+    facts.push(`Anno ${year - 1} con redditi misti.`);
+  }
+
+  if (isRegimeTransition) {
+    warnings.push(
+      `Tra ${year - 1} e ${year} c'e una transizione di regime (${previousRegime} -> ${currentRegime}). Gli acconti storici possono essere prudenziali ma non ottimizzati.`,
+    );
+    facts.push(`Cambio regime ${previousRegime} -> ${currentRegime}.`);
+  }
+
+  if (previousRegime && previousRegime !== 'forfettario' && currentRegime === 'forfettario') {
+    warnings.push(
+      `Lo storico ${year - 1} non e forfettario puro: confronta sempre metodo storico e previsionale prima di assumere che l'acconto storico sia il migliore.`,
+    );
+  }
+
+  return {
+    year,
+    currentRegime,
+    previousRegime,
+    previousHadEmployeeIncome,
+    isRegimeTransition,
+    warnings,
+    facts,
+  };
+}
+
 // --- Helpers privati (non esportati) -------------------------------------
 
 function ceil2(n: number): number {

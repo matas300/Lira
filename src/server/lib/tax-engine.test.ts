@@ -1,7 +1,12 @@
 // src/server/lib/tax-engine.test.ts
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildAccontoPlan, buildForfettarioScenario, type ScenarioInput } from './tax-engine';
+import {
+  buildAccontoPlan,
+  buildForfettarioScenario,
+  buildTransitionDiagnostics,
+  type ScenarioInput,
+} from './tax-engine';
 import { getInpsArtComForYear } from '@shared/inps-params';
 
 test('buildAccontoPlan: importo 0 → mode none', () => {
@@ -139,4 +144,36 @@ test('buildForfettarioScenario: formula breakdown contiene 5 voci', () => {
   const r = buildForfettarioScenario(baseScenarioInput());
   assert.equal(r.formula.length, 5);
   assert.equal(r.formula[0]?.label, 'Ricavi incassati');
+});
+
+// --- buildTransitionDiagnostics (Task 12) -------------------------------
+
+test('buildTransitionDiagnostics: nessun cambiamento → warnings vuote', () => {
+  const r = buildTransitionDiagnostics({
+    year: 2026,
+    currentSettings: { regime: 'forfettario', haRedditoDipendente: 0 },
+    previousSettings: { regime: 'forfettario', haRedditoDipendente: 0 },
+  });
+  assert.equal(r.warnings.length, 0);
+  assert.equal(r.isRegimeTransition, false);
+});
+
+test('buildTransitionDiagnostics: cambio regime → warning', () => {
+  const r = buildTransitionDiagnostics({
+    year: 2026,
+    currentSettings: { regime: 'forfettario' },
+    previousSettings: { regime: 'ordinario' },
+  });
+  assert.equal(r.isRegimeTransition, true);
+  assert.ok(r.warnings.length > 0);
+});
+
+test('buildTransitionDiagnostics: anno precedente reddito misto → warning', () => {
+  const r = buildTransitionDiagnostics({
+    year: 2026,
+    currentSettings: { regime: 'forfettario' },
+    previousSettings: { regime: 'forfettario', haRedditoDipendente: 1 },
+  });
+  assert.equal(r.previousHadEmployeeIncome, true);
+  assert.ok(r.warnings.some((w) => /dipendente/i.test(w)));
 });
