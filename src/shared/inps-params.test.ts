@@ -6,8 +6,8 @@ test('INPS_ARTCOM 2025 contiene minimale, quota fissa, aliquota, massimale', () 
   const p = INPS_ARTCOM[2025];
   assert.ok(p, '2025 deve esistere');
   assert.ok(p.minimaleAnnuo > 17000 && p.minimaleAnnuo < 20000, 'minimale 2025 nel range atteso');
-  assert.ok(p.quotaFissaAnnua > 4000 && p.quotaFissaAnnua < 5000, 'quota fissa 2025 nel range atteso');
-  assert.equal(p.aliquota, 0.24);
+  assert.ok(p.quotaFissaAnnuaArtigiano > 4000 && p.quotaFissaAnnuaArtigiano < 5000, 'quota fissa 2025 nel range atteso');
+  assert.equal(p.aliquotaArtigiano, 0.24);
   assert.equal(p.aliquotaCommerciante, 0.2448);
   assert.ok(p.massimale > 100000);
 });
@@ -32,9 +32,21 @@ test('getInpsArtComForYear: anno valido → params', () => {
   assert.equal(typeof p.minimaleAnnuo, 'number');
 });
 
-test('INPS_ARTCOM 2025: quotaFissaAnnuaCommerciante > quotaFissaAnnua (INVS surcharge)', () => {
+test('INPS_ARTCOM 2025: quotaFissaAnnuaCommerciante > quotaFissaAnnuaArtigiano (surcharge L. 662/1996)', () => {
   const p = INPS_ARTCOM[2025];
   assert.ok(p);
-  assert.ok(p.quotaFissaAnnuaCommerciante > p.quotaFissaAnnua, 'commerciante deve essere maggiore di artigiano');
+  assert.ok(p.quotaFissaAnnuaCommerciante > p.quotaFissaAnnuaArtigiano, 'commerciante deve essere maggiore di artigiano');
   assert.ok(p.quotaFissaAnnuaCommerciante < 5000);
+});
+
+test('getInpsGsForYear: anno mancante → throw con messaggio chiaro', () => {
+  assert.throws(
+    () => getInpsGsForYear(1999),
+    /INPS_GS.*1999/,
+  );
+});
+
+test('getInpsGsForYear: anno valido → params', () => {
+  const p = getInpsGsForYear(2025);
+  assert.equal(typeof p.massimale, 'number');
 });

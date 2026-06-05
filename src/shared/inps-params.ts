@@ -1,9 +1,11 @@
 // Parametri INPS annuali per Partita IVA forfettaria.
 //
 // Due gestioni supportate:
-// - Artigiani/Commercianti (IVS): quota fissa annua sul minimale + quota
-//   variabile sulla parte eccedente. Aliquote: 24% artigiani, 24,48%
-//   commercianti (+0,48 p.p. art. 5 L. 160/2019 - tassa scopi previdenziali).
+// - Artigiani/Commercianti (IVS - Invalidità, Vecchiaia, Superstiti): quota
+//   fissa annua sul minimale + quota variabile sulla parte eccedente.
+//   Aliquote: 24% artigiani, 24,48% commercianti (+0,48 p.p. contributo
+//   aggiuntivo per indennizzo cessazione attività commerciali, L. 662/1996
+//   art. 1 c. 16).
 // - Gestione Separata (L. 335/1995 art. 2 c. 26): contributo proporzionale
 //   senza minimale, capped al massimale annuo. Aliquote: 26,07% senza altra
 //   cassa, 24% con altra cassa/pensionato.
@@ -23,14 +25,15 @@
 export interface InpsArtComParams {
   minimaleAnnuo: number;
   // Quota fissa annua artigiano = minimale * 0.24 + 7.44 (contributo
-  // aggiuntivo fisso art. 5 L. 160/2019). Esempio 2025: 18555 * 0.24 + 7.44.
-  quotaFissaAnnua: number;
+  // maternità fisso, D.M. 12/02/1985 ex L. 1204/1971). Esempio 2025:
+  // 18555 * 0.24 + 7.44.
+  quotaFissaAnnuaArtigiano: number;
   // Quota fissa annua commerciante = minimale * 0.2448 + 7.44. Differisce
-  // da artigiano per la maggiorazione 0,48 p.p. (tassa scopi previdenziali
-  // INVS commercianti, art. 5 L. 160/2019).
+  // da artigiano per la maggiorazione 0,48 p.p. (contributo aggiuntivo per
+  // indennizzo cessazione attività commerciali, L. 662/1996 art. 1 c. 16).
   quotaFissaAnnuaCommerciante: number;
-  aliquota: number; // artigiano (0.24)
-  aliquotaCommerciante: number; // commerciante (0.2448)
+  aliquotaArtigiano: number; // 0.24
+  aliquotaCommerciante: number; // 0.2448
   massimale: number;
 }
 
@@ -40,26 +43,26 @@ export interface InpsGsParams {
   massimale: number;
 }
 
-export const INPS_ARTCOM: Record<number, InpsArtComParams> = Object.freeze({
+export const INPS_ARTCOM: Readonly<Record<number, Readonly<InpsArtComParams>>> = Object.freeze({
   2024: Object.freeze({
     minimaleAnnuo: 18415,
-    quotaFissaAnnua: 4427.04,
+    quotaFissaAnnuaArtigiano: 4427.04,
     quotaFissaAnnuaCommerciante: 4515.43,
-    aliquota: 0.24,
+    aliquotaArtigiano: 0.24,
     aliquotaCommerciante: 0.2448,
     massimale: 119650,
   }),
   2025: Object.freeze({
     minimaleAnnuo: 18555,
-    quotaFissaAnnua: 4460.64,
+    quotaFissaAnnuaArtigiano: 4460.64,
     quotaFissaAnnuaCommerciante: 4549.70,
-    aliquota: 0.24,
+    aliquotaArtigiano: 0.24,
     aliquotaCommerciante: 0.2448,
     massimale: 120607,
   }),
 });
 
-export const INPS_GS: Record<number, InpsGsParams> = Object.freeze({
+export const INPS_GS: Readonly<Record<number, Readonly<InpsGsParams>>> = Object.freeze({
   2024: Object.freeze({
     aliquotaSenzaAltraCassa: 0.2607,
     aliquotaConAltraCassa: 0.24,
