@@ -46,7 +46,10 @@ export function buildAccontoPlan(baseAmount: number, rules?: AccontoRules): Acco
 // --- Helpers privati (non esportati) -------------------------------------
 
 function ceil2(n: number): number {
-  return Math.round(n * 100) / 100;
+  // True ceil to 2 decimals — porta da CalcoliVari/math-utils.js (ceil2).
+  // `Number.EPSILON` evita che noise FP (es. 0.30000000000000004) produca un cent in piu`.
+  if (!n) return 0;
+  return Math.ceil(n * 100 - Number.EPSILON) / 100;
 }
 
 /**
