@@ -17,7 +17,7 @@ export type CoefficienteAmmesso = (typeof COEFFICIENTI_VALIDI)[number];
  * il match è prefix-based su una scala gerarchica (divisione `NN`,
  * gruppo `NN.N`, classe `NN.NN`, categoria `NN.NN.N`).
  */
-export interface GruppoAteco {
+interface GruppoAteco {
   readonly id: string;
   readonly label: string;
   readonly coefficiente: CoefficienteAmmesso;
@@ -30,7 +30,7 @@ export interface GruppoAteco {
  * (no parsing numerico) per preservare i bordi tipo "46.2" che includono
  * tutti i sotto-codici "46.2x", "46.2x.xx".
  */
-export type AtecoRange =
+type AtecoRange =
   | { readonly kind: 'literal'; readonly prefix: string }
   | { readonly kind: 'range'; readonly from: string; readonly to: string };
 
@@ -39,7 +39,7 @@ const ATECO_FULL_RE = /^(\d{2})\.(\d{2})\.(\d{2})$/;
 
 // Mappa GRUPPI: trascrizione fedele del DM 23/01/2015 Allegato 4.
 // I labels e atecoHint riprendono CalcoliVari/ateco-coefficienti.js.
-export const GRUPPI_ATECO: readonly GruppoAteco[] = Object.freeze([
+const GRUPPI_ATECO: readonly GruppoAteco[] = Object.freeze([
   Object.freeze({
     id: 'g1',
     label: 'Industrie alimentari e delle bevande',
@@ -167,7 +167,7 @@ export function getCoefficienteByAteco(codice: string): number | null {
 /**
  * Variante che restituisce il gruppo intero (utile per UI/diagnostica).
  */
-export function getGruppoByAteco(codice: string): GruppoAteco | null {
+function getGruppoByAteco(codice: string): GruppoAteco | null {
   if (typeof codice !== 'string') return null;
   const match = ATECO_FULL_RE.exec(codice);
   if (!match) return null;
