@@ -5,6 +5,10 @@ import { getDb } from './db/client';
 import { healthRoute } from './routes/health';
 import { authRoute, initAuthRoute } from './routes/auth';
 import { profilesRoute } from './routes/profiles';
+import { yearSettingsRoute } from './routes/year-settings';
+import { pagamentiRoute } from './routes/pagamenti';
+import { scadenziarioRoute } from './routes/scadenziario';
+import { taxRoute } from './routes/tax';
 import { errorHandler } from './middleware/error';
 import type { AuthEnv } from './middleware/auth';
 
@@ -20,6 +24,10 @@ app.onError(errorHandler);
 app.route('/api/health', healthRoute);
 app.route('/api/auth', authRoute);
 app.route('/api/profiles', profilesRoute);
+app.route('/api/year-settings', yearSettingsRoute);
+app.route('/api/pagamenti', pagamentiRoute);
+app.route('/api/scadenziario', scadenziarioRoute);
+app.route('/api/tax', taxRoute);
 
 const port = Number(process.env.PORT ?? 8787);
 
