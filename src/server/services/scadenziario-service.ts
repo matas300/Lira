@@ -1,0 +1,558 @@
+// src/server/services/scadenziario-service.ts
+//
+// Orchestratore I/O dello scadenziario fiscale forfettario per un dato
+// `profileId × year`. Si trova fra DB (Drizzle) e le pure functions in
+// `lib/tax-engine` + `lib/scadenziario-engine`:
+//
+//   ┌── DB ─────────────────────────────────────────────────────────┐
+//   │ year_settings, profiles, fatture, pagamenti                  │
+//   └────────────┬──────────────────────────────────────────────────┘
+//                │ load + shape
+//                ▼
+//   ┌── scadenziario-service.buildScadenziarioView ────────────────┐
+//   │ - fetchYearSettings (N, N-1)                                 │
+//   │ - loadGrossCollected (fatture pag_anno=N, fallback ys)       │
+//   │ - sumAccontiReali (pagamenti puri + linkedKeys breakdown)    │ ← FIX A6
+//   │ - buildForfettarioMethodComparison (tax-engine)              │
+//   │ - loadPaymentsByKey (pagamenti puri + breakdown)             │
+//   │ - loadBolloByQuarter (fatture marca_da_bollo=1 nell'anno)    │
+//   │ - buildScadenziario (scadenziario-engine)                    │
+//   │ - evaluateAuditChecks (audit-checks)                         │
+//   └────────────┬─────────────────────────────────────────────────┘
+//                │
+//                ▼
+//   ScadenziarioView (= ScadenziarioOutput + methodComparison + transition)
+//
+// **FIX A6** (acconti REALI vs stimati): il saldo di sostitutiva e contributi
+// dell'anno N si calcola sottraendo gli acconti VERSATI nell'anno N-1, non
+// quelli pianificati. Qui si aggregano i pagamenti puri (scheduleKey match
+// per `imposta_acc1_{N-1}` + `imposta_acc2_{N-1}`) e i pagamenti misti
+// (linkedKeys JSON breakdown).
+//
+// **404 boundary**: se `year_settings[profile, year]` manca, il service
+// solleva `HttpError(404, 'YEAR_SETTINGS_NOT_FOUND')` che il middleware
+// `errorHandler` traduce in JSON. La route può semplicemente await senza
+// ulteriore wrapping.
+
+import { and, eq, inArray } from 'drizzle-orm';
+import type { Db } from '../db/client';
+import { yearSettings, pagamenti, fatture, profiles } from '../db/schema';
+import {
+  buildForfettarioMethodComparison,
+  type ComparisonInput,
+  type ContributionParams,
+} from '../lib/tax-engine';
+import {
+  buildScadenziario,
+  type ScadenziarioOutput,
+  type PaymentBreakdown,
+} from '../lib/scadenziario-engine';
+import { evaluateAuditChecks, type AuditWarning } from '@shared/audit-checks';
+import { getInpsArtComForYear } from '@shared/inps-params';
+import { buildScheduleKey } from '@shared/schedule-keys';
+import { FORFETTARIO_RULES } from '@shared/forfettario-rules';
+import { HttpError } from '../middleware/error';
+
+// --- Public surface -----------------------------------------------------
+
+/**
+ * Output del service: lo `ScadenziarioOutput` puro arricchito con il
+ * confronto storico↔previsionale (per il pannello "metodo acconti" del
+ * frontend) e la diagnostica di transizione regime/redditi misti.
+ */
+export interface ScadenziarioView extends ScadenziarioOutput {
+  methodComparison: ReturnType<typeof buildForfettarioMethodComparison>;
+  transition: ReturnType<typeof buildForfettarioMethodComparison>['transition'];
+  /** Hint per il frontend: dove ottenere le costanti legali esposte. */
+  rulesRef: string;
+}
+
+export interface BuildScadenziarioArgs {
+  db: Db;
+  profileId: string;
+  year: number;
+  /** ISO `YYYY-MM-DD`. Se omesso, usa la data odierna UTC. */
+  today?: string;
+}
+
+type YearSettingsRow = typeof yearSettings.$inferSelect;
+
+// Diritto camerale CCIAA: in 2A è un default fisso (53 €). In 2B diventerà
+// configurabile per profilo/CCIAA (registrazione classe maggiorata o ridotta).
+const CAMERA_COMMERCE_DEFAULT_2A = 53;
+
+// --- DB loaders (interni) ----------------------------------------------
+
+/**
+ * Carica la riga `year_settings` per il profilo e l'anno. Ritorna `null`
+ * se non presente (utile per `year - 1` opzionale).
+ */
+async function fetchYearSettings(
+  db: Db,
+  profileId: string,
+  year: number,
+): Promise<YearSettingsRow | null> {
+  const rows = await db
+    .select()
+    .from(yearSettings)
+    .where(and(eq(yearSettings.profileId, profileId), eq(yearSettings.year, year)));
+  return rows[0] ?? null;
+}
+
+/**
+ * Calcola il fatturato lordo dell'anno usato per le simulazioni fiscali.
+ * Priorità:
+ * 1. Somma `fatture.importo - ritenuta` con `pag_anno = year` (escluse le
+ *    righe non ancora incassate, per cui `pag_anno IS NULL`).
+ * 2. Fallback su `year_settings.primoAnnoFatturatoPrec` se l'anno è il
+ *    primo e l'utente ha registrato il fatturato a mano.
+ * 3. Default 0.
+ */
+async function loadGrossCollected(
+  db: Db,
+  profileId: string,
+  year: number,
+  ys: YearSettingsRow,
+): Promise<number> {
+  const rows = await db
+    .select()
+    .from(fatture)
+    .where(and(eq(fatture.profileId, profileId), eq(fatture.pagAnno, year)));
+  if (rows.length > 0) {
+    let total = 0;
+    for (const f of rows) {
+      const importo = Number(f.importo);
+      const ritenuta = Number(f.ritenuta ?? 0);
+      total += importo - ritenuta;
+    }
+    return total;
+  }
+  if (ys.primoAnnoFatturatoPrec != null) {
+    return Number(ys.primoAnnoFatturatoPrec);
+  }
+  return 0;
+}
+
+/**
+ * Somma gli acconti REALMENTE versati per le chiavi richieste, considerando
+ * sia i pagamenti puri (`scheduleKey` match) sia i pagamenti misti
+ * (`linkedKeys` JSON breakdown). I pagamenti misti hanno `scheduleKey = null`
+ * e una struttura JSON `[{ key, amount }]` in `linkedKeys`.
+ *
+ * Implementazione FIX A6: il chiamante passa le chiavi degli acconti
+ * sostitutiva (o contributi) dell'anno precedente — questo importo viene
+ * sottratto dal saldo dell'anno N nello scenario forfettario.
+ */
+async function sumAccontiReali(
+  db: Db,
+  profileId: string,
+  accontoKeys: string[],
+): Promise<number> {
+  if (accontoKeys.length === 0) return 0;
+
+  // Pagamenti puri imputati direttamente a una scheduleKey degli acconti.
+  const pure = await db
+    .select()
+    .from(pagamenti)
+    .where(
+      and(eq(pagamenti.profileId, profileId), inArray(pagamenti.scheduleKey, accontoKeys)),
+    );
+  let total = 0;
+  for (const p of pure) {
+    total += Number(p.importo) || 0;
+  }
+
+  // Pagamenti misti: scheduleKey è null ma linkedKeys contiene un breakdown.
+  // NB: filtriamo lato JS perché il filtro su scheduleKey IS NULL andrebbe
+  // espresso con `isNull` ed è preferibile evitare un secondo round-trip:
+  // qui carichiamo tutti i pagamenti del profile (cardinalità contenuta:
+  // ~50/anno tipici) e iteriamo. Per profili HV passeremo a query mirata.
+  const allOfProfile = await db
+    .select()
+    .from(pagamenti)
+    .where(eq(pagamenti.profileId, profileId));
+  for (const p of allOfProfile) {
+    if (p.scheduleKey) continue; // già contato nel ramo "puro"
+    if (!p.linkedKeys) continue;
+    const breakdown = parseLinkedKeys(p.linkedKeys);
+    if (!breakdown) continue;
+    for (const b of breakdown) {
+      if (accontoKeys.includes(b.key)) {
+        total += Number(b.amount) || 0;
+      }
+    }
+  }
+
+  // Arrotonda a 2 decimali per evitare drift FP nei test.
+  return Math.round(total * 100) / 100;
+}
+
+/**
+ * Parsea `linkedKeys` (TEXT JSON nel DB) in `[{ key, amount }]`. Restituisce
+ * `null` se il JSON è malformato o se la struttura non corrisponde. Le
+ * voci con `key`/`amount` mancanti o non-stringa/non-numero vengono filtrate.
+ */
+function parseLinkedKeys(raw: string): Array<{ key: string; amount: number }> | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed)) return null;
+  const out: Array<{ key: string; amount: number }> = [];
+  for (const item of parsed) {
+    if (!item || typeof item !== 'object') continue;
+    const rec = item as Record<string, unknown>;
+    const key = typeof rec.key === 'string' ? rec.key : null;
+    const amount = typeof rec.amount === 'number' ? rec.amount : null;
+    if (key !== null && amount !== null) {
+      out.push({ key, amount });
+    }
+  }
+  return out;
+}
+
+/**
+ * Costruisce la mappa `scheduleKey → { paidTotal, payments[] }` per TUTTI i
+ * pagamenti del profilo. Include:
+ * - pagamenti puri: contribuiscono direttamente alla loro chiave con `mode: 'pure'`.
+ * - pagamenti misti: ogni voce del breakdown contribuisce alla rispettiva
+ *   chiave con `mode: 'mixed'` e `importo = amount` della voce.
+ *
+ * Questa mappa viene consumata da `buildScadenziario` per associare ad ogni
+ * riga il `paidTotal` e l'array `payments` (necessari per status + UI dettaglio).
+ */
+async function loadPaymentsByKey(
+  db: Db,
+  profileId: string,
+): Promise<Map<string, { paidTotal: number; payments: PaymentBreakdown[] }>> {
+  const rows = await db.select().from(pagamenti).where(eq(pagamenti.profileId, profileId));
+  const map = new Map<string, { paidTotal: number; payments: PaymentBreakdown[] }>();
+
+  for (const p of rows) {
+    const importo = Number(p.importo);
+    const data = String(p.data);
+    if (p.scheduleKey) {
+      const entry = map.get(p.scheduleKey) ?? { paidTotal: 0, payments: [] };
+      entry.paidTotal += importo;
+      entry.payments.push({ id: p.id, data, importo, mode: 'pure' });
+      map.set(p.scheduleKey, entry);
+      continue;
+    }
+    if (!p.linkedKeys) continue;
+    const breakdown = parseLinkedKeys(p.linkedKeys);
+    if (!breakdown) continue;
+    for (const b of breakdown) {
+      const entry = map.get(b.key) ?? { paidTotal: 0, payments: [] };
+      entry.paidTotal += b.amount;
+      entry.payments.push({ id: p.id, data, importo: b.amount, mode: 'mixed' });
+      map.set(b.key, entry);
+    }
+  }
+
+  // Arrotonda i totali per stabilità di confronto con i range engine.
+  for (const v of map.values()) {
+    v.paidTotal = Math.round(v.paidTotal * 100) / 100;
+  }
+  return map;
+}
+
+/**
+ * Calcola la marca da bollo dovuta divisa per "quarter aggregator": Q123 (mesi
+ * 1-9) e Q4 (mesi 10-12). 2 € per ciascuna fattura con `marca_da_bollo=1` e
+ * `data` nell'anno richiesto. La semplificazione "soglia 5k€" entro Q1/Q2
+ * sarà gestita in 2B (qui Q123 collassa già a un'unica rata 30/09 → 31/05+1).
+ */
+async function loadBolloByQuarter(
+  db: Db,
+  profileId: string,
+  year: number,
+): Promise<{ q123: number; q4: number }> {
+  const rows = await db.select().from(fatture).where(eq(fatture.profileId, profileId));
+  const prefix = `${year}-`;
+  let q123 = 0;
+  let q4 = 0;
+  for (const f of rows) {
+    if (f.marcaDaBollo !== 1) continue;
+    const date = String(f.data);
+    if (!date.startsWith(prefix)) continue;
+    const monthStr = date.slice(5, 7);
+    const month = parseInt(monthStr, 10);
+    if (!Number.isFinite(month)) continue;
+    if (month >= 1 && month <= 9) {
+      q123 += 2;
+    } else {
+      q4 += 2;
+    }
+  }
+  return { q123, q4 };
+}
+
+// --- INPS shaping -------------------------------------------------------
+
+/**
+ * Costruisce i parametri contributivi per uno scenario forfettario:
+ * - artigiani/commercianti: quota fissa annua dalla tabella INPS_ARTCOM
+ *   selezionando artigiano vs commerciante, eventualmente moltiplicata per
+ *   il coefficiente di riduzione 35% (se il flag è attivo).
+ * - gestione separata: niente quota fissa.
+ *
+ * Per gli anni non ancora pubblicati in `INPS_ARTCOM` (es. anno futuro non
+ * coperto), `getInpsArtComForYear` solleva; qui catturiamo l'errore e
+ * restituiamo `null` lasciando al chiamante decidere il fallback (a
+ * `fixedAnnual: 0`). Lo scadenziario-engine ha la stessa convenzione.
+ */
+function buildContributionParams(
+  ys: YearSettingsRow | null,
+  year: number,
+  saldoAccontoBase: number,
+): ContributionParams {
+  if (!ys || ys.inpsMode !== 'artigiani_commercianti') {
+    return { mode: 'gestione_separata', fixedAnnual: 0, saldoAccontoBase };
+  }
+  let quota = 0;
+  try {
+    const params = getInpsArtComForYear(year);
+    quota =
+      ys.inpsCategoria === 'commerciante'
+        ? params.quotaFissaAnnuaCommerciante
+        : params.quotaFissaAnnuaArtigiano;
+  } catch {
+    quota = 0;
+  }
+  const riduzione =
+    ys.riduzione35 === 1 ? FORFETTARIO_RULES.riduzioneInpsCoefficiente : 1;
+  return {
+    mode: 'artigiani_commercianti',
+    fixedAnnual: quota * riduzione,
+    saldoAccontoBase,
+  };
+}
+
+// --- Public function ----------------------------------------------------
+
+/**
+ * Punto di ingresso del service: produce la `ScadenziarioView` per la coppia
+ * `profileId × year`. La funzione è "thin": tutta la logica fiscale e di
+ * scheduling vive negli engine puri; qui orchestriamo solo le query, lo
+ * shaping degli input e l'aggregazione dei warning.
+ *
+ * Throws:
+ * - `HttpError(404, 'YEAR_SETTINGS_NOT_FOUND')` se manca year_settings.
+ * - `HttpError(404, 'PROFILE_NOT_FOUND')` se il profilo è stato cancellato
+ *   in concomitanza con la chiamata (race rara, ma protezione difensiva).
+ */
+export async function buildScadenziarioView(
+  args: BuildScadenziarioArgs,
+): Promise<ScadenziarioView> {
+  const { db, profileId, year } = args;
+  const today = args.today ?? new Date().toISOString().slice(0, 10);
+
+  // 1. year_settings — N e N-1 (quest'ultimo opzionale per il primo anno).
+  const ys = await fetchYearSettings(db, profileId, year);
+  if (!ys) {
+    // Il code è incluso nel messaggio: `assert.rejects` (e i log applicativi)
+    // matchano `YEAR_SETTINGS_NOT_FOUND` direttamente nel `Error.toString()`.
+    throw new HttpError(
+      404,
+      'YEAR_SETTINGS_NOT_FOUND',
+      `YEAR_SETTINGS_NOT_FOUND: year_settings non trovata per profile=${profileId} year=${year}`,
+    );
+  }
+  const ysPrev = await fetchYearSettings(db, profileId, year - 1);
+
+  // 2. profilo + estrazione `data_inizio_attivita` (JSON in `attivita`).
+  const [profile] = await db
+    .select()
+    .from(profiles)
+    .where(eq(profiles.id, profileId))
+    .limit(1);
+  if (!profile) {
+    throw new HttpError(
+      404,
+      'PROFILE_NOT_FOUND',
+      `PROFILE_NOT_FOUND: profile=${profileId} non trovato`,
+    );
+  }
+  const dataInizioAttivita = extractDataInizioAttivita(profile.attivita, year);
+
+  // 3. fatturato lordo dell'anno (fatture pagate o fallback).
+  const grossCollected = await loadGrossCollected(db, profileId, year, ys);
+
+  // 4. parametri contributivi per i due scenari (storico vs previsionale).
+  const currentContribution = buildContributionParams(ys, year, 0);
+  const previousContribution = buildContributionParams(
+    ysPrev,
+    year - 1,
+    Number(ysPrev?.primoAnnoContribVariabiliPrec ?? 0),
+  );
+
+  // 5. FIX A6: acconti REALMENTE versati nell'anno precedente.
+  const prevYear = year - 1;
+  const accontiSostitutivaKeys = [
+    buildScheduleKey('imposta_acc1', prevYear),
+    buildScheduleKey('imposta_acc2', prevYear),
+  ];
+  const accontiContribKeys = [
+    buildScheduleKey('contributi_acc1', prevYear),
+    buildScheduleKey('contributi_acc2', prevYear),
+  ];
+  const accontiSostitutivaPagatiReali = await sumAccontiReali(
+    db,
+    profileId,
+    accontiSostitutivaKeys,
+  );
+  const accontiContribPagatiReali = await sumAccontiReali(
+    db,
+    profileId,
+    accontiContribKeys,
+  );
+
+  // 6. comparison input — usa metodo "storico" (build di entrambi gli scenari).
+  // La `methodSetting` decide quale dei due "selected" exporremo.
+  const methodSetting = (ys.scadenziarioMetodo === 'previsionale' ? 'previsionale' : 'storico') as
+    | 'storico'
+    | 'previsionale';
+
+  // Forecast bases (usati solo in metodo previsionale; in storico il tax-engine
+  // ignora `forecast*` e usa lo storico). Usiamo `coefficiente * grossCollected`
+  // meno la quota fissa come stima conservativa della base contributi.
+  const forecastBase = grossCollected * Number(ys.coefficiente);
+  const forecastContributionBase = Math.max(
+    forecastBase - currentContribution.fixedAnnual,
+    0,
+  );
+
+  const comparisonInput: ComparisonInput = {
+    year,
+    method: methodSetting,
+    settings: {
+      coefficiente: Number(ys.coefficiente),
+      impostaSostitutiva: Number(ys.impostaSostitutiva),
+      riduzione35: ys.riduzione35 === 1,
+    },
+    grossCollected,
+    currentContribution,
+    previousContribution,
+    previousTaxBase: Number(ysPrev?.primoAnnoImpostaPrec ?? 0),
+    previousContributionAccontiPaid: Number(
+      ysPrev?.primoAnnoAccontiContribPrec ?? 0,
+    ),
+    accontiSostitutivaPagatiReali,
+    accontiContribPagatiReali,
+    forecastContributionBase,
+    forecastTaxBase: forecastBase,
+    methodSetting,
+    currentSettings: {
+      regime: ys.regime,
+      haRedditoDipendente: ys.haRedditoDipendente,
+    },
+    previousSettings: ysPrev
+      ? {
+          regime: ysPrev.regime,
+          haRedditoDipendente: ysPrev.haRedditoDipendente,
+        }
+      : {},
+  };
+
+  const methodComparison = buildForfettarioMethodComparison(comparisonInput);
+
+  // 7. pagamenti per schedule key + bollo trimestrale.
+  const paymentsByKey = await loadPaymentsByKey(db, profileId);
+  const bolloByQuarter = await loadBolloByQuarter(db, profileId, year);
+
+  // 8. costruzione scadenziario "puro". Lo shape della yearSettings qui
+  // converte i nomi camelCase del DB nei nomi snake-case richiesti
+  // dall'engine (riduzione_35, riduzione_35_comunicata).
+  const scadOut = buildScadenziario({
+    year,
+    yearSettings: {
+      regime: ys.regime,
+      coefficiente: Number(ys.coefficiente),
+      impostaSostitutiva: Number(ys.impostaSostitutiva),
+      inpsMode: ys.inpsMode as 'artigiani_commercianti' | 'gestione_separata',
+      inpsCategoria: ys.inpsCategoria ?? null,
+      riduzione_35: ys.riduzione35,
+      riduzione_35_comunicata: ys.riduzione35Comunicata,
+      haRedditoDipendente: ys.haRedditoDipendente,
+      scadenziarioMetodo: methodSetting,
+      prorogaSaldoAt: ys.prorogaSaldoAt ?? null,
+    },
+    previousYearSettings: ysPrev
+      ? {
+          regime: ysPrev.regime,
+          coefficiente: Number(ysPrev.coefficiente),
+          impostaSostitutiva: Number(ysPrev.impostaSostitutiva),
+          inpsMode: ysPrev.inpsMode as 'artigiani_commercianti' | 'gestione_separata',
+          inpsCategoria: ysPrev.inpsCategoria ?? null,
+          riduzione_35: ysPrev.riduzione35,
+          riduzione_35_comunicata: ysPrev.riduzione35Comunicata,
+          haRedditoDipendente: ysPrev.haRedditoDipendente,
+          scadenziarioMetodo:
+            ysPrev.scadenziarioMetodo === 'previsionale' ? 'previsionale' : 'storico',
+          prorogaSaldoAt: ysPrev.prorogaSaldoAt ?? null,
+        }
+      : null,
+    scenarios: {
+      historical: methodComparison.historical,
+      previsionale: methodComparison.previsionale,
+    },
+    paymentsByKey,
+    bolloByQuarter,
+    cameraCommerce: CAMERA_COMMERCE_DEFAULT_2A,
+  });
+
+  // 9. warnings runtime audit (C1, A1, M1, NO_REVENUE_SOURCE).
+  const auditWarnings = evaluateAuditChecks({
+    year,
+    yearSettings: {
+      regime: ys.regime,
+      coefficiente: Number(ys.coefficiente),
+      impostaSostitutiva: Number(ys.impostaSostitutiva),
+      inpsMode: ys.inpsMode,
+      inpsCategoria: ys.inpsCategoria ?? null,
+      riduzione_35: ys.riduzione35,
+      riduzione_35_comunicata: ys.riduzione35Comunicata,
+      scadenziarioMetodo: methodSetting,
+    },
+    profile: { dataInizioAttivita },
+    grossCollected,
+    today,
+  });
+
+  const warnings: AuditWarning[] = [...scadOut.warnings, ...auditWarnings];
+
+  return {
+    ...scadOut,
+    warnings,
+    methodComparison,
+    transition: methodComparison.transition,
+    rulesRef: `/api/tax/rules?year=${year}`,
+  };
+}
+
+/**
+ * Estrae `data_inizio_attivita` da `profiles.attivita` (TEXT JSON). Supporta
+ * sia la chiave snake_case canonica (`data_inizio_attivita`) sia la camelCase
+ * (`dataInizioAttivita`) per resilienza all'importer legacy. Fallback al
+ * 1° gennaio dell'anno precedente se mancante — l'audit-check A1 vede così
+ * un anno "non startup" e ignora il check senza falsi positivi.
+ */
+function extractDataInizioAttivita(attivitaJson: string | null, year: number): string {
+  const fallback = `${year - 1}-01-01`;
+  if (!attivitaJson) return fallback;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(attivitaJson);
+  } catch {
+    return fallback;
+  }
+  if (!parsed || typeof parsed !== 'object') return fallback;
+  const obj = parsed as Record<string, unknown>;
+  const v = obj.data_inizio_attivita ?? obj.dataInizioAttivita;
+  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) {
+    return v;
+  }
+  return fallback;
+}
