@@ -1,5 +1,11 @@
 // src/shared/schemas.ts
 import { z } from 'zod';
+import {
+  isValidPartitaIvaIT,
+  isValidCodiceFiscaleFormat,
+  isValidCodiceSdi,
+  isValidPec,
+} from './validators';
 
 // ───── Auth ─────
 export const LoginInput = z.object({
@@ -137,4 +143,88 @@ export const TaxSimulateInput = z.object({
   grossCollected: z.number(),
   settings: YearSettingsInput.partial().optional(),
   method: ScadenziarioMetodoEnum.optional(),
+});
+
+// ───── Clienti (Slice 4A) ─────
+export const TipoClienteEnum = z.enum(['PF', 'PG', 'PA', 'Estero']);
+
+const optStr = z.string().trim().optional().nullable();
+
+const ClienteBase = z.object({
+  nome: z.string().trim().min(1).max(200),
+  tipoCliente: TipoClienteEnum.default('PG'),
+  partitaIva: z.string().trim().optional().nullable().transform((v) => (v ? v : null)),
+  codiceFiscale: z.string().trim().toUpperCase().optional().nullable().transform((v) => (v ? v : null)),
+  codiceSdi: z.string().trim().toUpperCase().default('0000000'),
+  pec: optStr,
+  indirizzo: optStr,
+  cap: optStr,
+  citta: optStr,
+  provincia: z.string().trim().toUpperCase().optional().nullable().transform((v) => (v ? v : null)),
+  nazione: z.string().trim().toUpperCase().length(2).default('IT'),
+  descrizioneStandard: optStr,
+  note: optStr,
+  isDefault: z.boolean().optional(),
+});
+
+function applyClienteRefines<T extends z.ZodTypeAny>(schema: T): T {
+  return schema
+    .refine((c: any) => c.partitaIva == null || isValidPartitaIvaIT(c.partitaIva), {
+      message: 'Partita IVA non valida (check-digit)', path: ['partitaIva'],
+    })
+    .refine((c: any) => c.codiceFiscale == null || isValidCodiceFiscaleFormat(c.codiceFiscale), {
+      message: 'Codice fiscale: formato non valido (16 alfanumerici)', path: ['codiceFiscale'],
+    })
+    .refine((c: any) => c.codiceSdi == null || c.tipoCliente == null
+      || isValidCodiceSdi(c.codiceSdi, c.tipoCliente), {
+      message: 'Codice SDI non valido per il tipo cliente', path: ['codiceSdi'],
+    })
+    .refine((c: any) => c.pec == null || isValidPec(c.pec), {
+      message: 'PEC non valida', path: ['pec'],
+    })
+    .refine((c: any) => c.nazione !== 'IT' || c.partitaIva != null || c.codiceFiscale != null, {
+      message: 'Cliente italiano: richiesta Partita IVA o Codice Fiscale (FatturaPA §1.4.1.2)',
+      path: ['partitaIva'],
+    }) as unknown as T;
+}
+
+export const ClienteCreateInput = applyClienteRefines(ClienteBase);
+export const ClienteUpdateInput = applyClienteRefines(ClienteBase.partial());
+
+export const ClientePublic = z.object({
+  id: z.string(),
+  profileId: z.string(),
+  nome: z.string(),
+  tipoCliente: TipoClienteEnum,
+  partitaIva: z.string().nullable(),
+  codiceFiscale: z.string().nullable(),
+  codiceSdi: z.string(),
+  pec: z.string().nullable(),
+  indirizzo: z.string().nullable(),
+  cap: z.string().nullable(),
+  citta: z.string().nullable(),
+  provincia: z.string().nullable(),
+  nazione: z.string(),
+  descrizioneStandard: z.string().nullable(),
+  isDefault: z.boolean(),
+  note: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export const PivaLookupData = z.object({
+  nome: z.string().optional(),
+  codiceFiscale: z.string().optional(),
+  indirizzo: z.string().optional(),
+  cap: z.string().optional(),
+  citta: z.string().optional(),
+  provincia: z.string().optional(),
+  pec: z.string().optional(),
+  codiceSdi: z.string().optional(),
+});
+
+export const PivaLookupResult = z.object({
+  ok: z.boolean(),
+  data: PivaLookupData.optional(),
+  code: z.string().optional(),
 });

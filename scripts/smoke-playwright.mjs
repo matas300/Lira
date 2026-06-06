@@ -92,6 +92,59 @@ async function main() {
   check('Dashboard shows "Benvenuto"', !!dashText?.includes('Benvenuto'));
   await screenshot(page, '05-dashboard');
 
+  // ─── STEP 4B: Clienti — create + list + set default (Slice 4A) ───
+  console.log('\n=== STEP 4B: Clienti CRUD ===');
+  // bottom-nav.ts: <a data-route="/clienti">; navigate via SPA router (fallback goto)
+  const clientiTab = page.locator('[data-route="/clienti"]').first();
+  if ((await clientiTab.count()) > 0) {
+    await clientiTab.click();
+  } else {
+    await page.goto(`${BASE_URL}/clienti`, { waitUntil: 'networkidle' });
+  }
+  await page.waitForTimeout(1500);
+  const urlClienti = page.url();
+  check('On /clienti page', urlClienti.includes('/clienti'), `url=${urlClienti}`);
+  await screenshot(page, '05b-clienti-page');
+
+  // Open "Nuovo" modal and create a cliente (P.IVA valida con check-digit corretto)
+  const CLI_NAME = 'Smoke Cliente SpA';
+  await page.click('[data-new]');
+  await page.waitForTimeout(500);
+  await page.fill('[data-form] [name="nome"]', CLI_NAME);
+  await page.fill('[data-form] [name="partitaIva"]', '00743110157');
+  await screenshot(page, '05c-clienti-form');
+  await page.click('[data-form] button[type="submit"]');
+  await page.waitForTimeout(1500);
+  // Se il modal è rimasto aperto (es. 409 su DB non fresco al re-run) lo chiudo.
+  await page.keyboard.press('Escape').catch(() => {});
+  await page.waitForTimeout(300);
+  const listText = await page.textContent('[data-list]').catch(() => '');
+  check('Cliente appears in list', !!listText && listText.includes(CLI_NAME),
+    `list="${(listText || '').slice(0, 120)}"`);
+  await screenshot(page, '05d-clienti-list');
+
+  // Set as default: apro la riga, spunto "predefinito", salvo → compare ★
+  const cliRow = page.locator('.cliente-row', { hasText: CLI_NAME }).first();
+  if ((await cliRow.count()) > 0) {
+    await cliRow.click();
+    await page.waitForTimeout(500);
+    await page.check('[data-form] [name="isDefault"]');
+    await page.click('[data-form] button[type="submit"]');
+    await page.waitForTimeout(1500);
+    await page.keyboard.press('Escape').catch(() => {});
+    await page.waitForTimeout(300);
+    const listText2 = await page.textContent('[data-list]').catch(() => '');
+    check('Cliente marked default (star)', !!listText2 && listText2.includes('★'),
+      `list="${(listText2 || '').slice(0, 120)}"`);
+    await screenshot(page, '05e-clienti-default');
+  } else {
+    check('Cliente row found for default toggle', false, 'row not found');
+  }
+
+  // Torno alla dashboard per non perturbare gli step profili successivi
+  await page.goto(BASE_URL, { waitUntil: 'networkidle' });
+  await page.waitForTimeout(1000);
+
   // ─── STEP 5: Navigate to /profiles via profile-pill ───
   console.log('\n=== STEP 5: Navigate to /profiles ===');
   // header.ts: <a class="profile-pill" data-route="/profiles">

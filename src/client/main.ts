@@ -10,6 +10,8 @@ const routes: Record<string, () => Promise<PageModule>> = {
   '/': () => import('./pages/dashboard'),
   // @ts-ignore — pages/profiles.ts created in T23
   '/profiles': () => import('./pages/profiles'),
+  // @ts-ignore — pages/clienti.ts created in Slice 4A
+  '/clienti': () => import('./pages/clienti'),
 };
 
 const PUBLIC_ROUTES = new Set(['/login']);

@@ -31,10 +31,10 @@
 - [ ] Form UI con dark theme portato da CalcoliVari
 
 ### Fase 4 — Clienti
-- [ ] CRUD clienti
-- [ ] Autofill da P.IVA (port OpenAPI integration)
-- [ ] Cliente default
-- [ ] Validation server-side (P.IVA IT, CF, IPA PA)
+- [x] CRUD clienti (`/api/clienti` scoped al profilo + pagina `/clienti` lista/ricerca/modal) (Slice 4A, 2026-06-06)
+- [x] Autofill da P.IVA (`GET /lookup/:piva`, openapi.com, key da env, degrado 503) (Slice 4A, 2026-06-06)
+- [x] Cliente default (colonna `is_default`, invariante ≤1 per profilo in transazione) (Slice 4A, 2026-06-06)
+- [x] Validation server-side: P.IVA IT check-digit, CF formato, SDI/IPA per tipo, PEC; envelope `400 VALIDATION` (Slice 4A, 2026-06-06)
 
 ### Fase 5 — Fatture (modulo principale)
 - [ ] Wizard 3-step creazione
