@@ -17,10 +17,20 @@ function esc(v: unknown): string {
 
 const TIPI: TipoCliente[] = ['PF', 'PG', 'PA', 'Estero'];
 
+// Chiavi ammesse dall'autofill (campi del form su cui mergere il risultato
+// lookup). Allowlist esplicita: il valore `k` arriva dalla risposta server e
+// finisce in un selettore querySelector — non fidarsi di chiavi impreviste.
+const AUTOFILL_KEYS = new Set([
+  'nome', 'codiceFiscale', 'indirizzo', 'cap', 'citta', 'provincia', 'pec', 'codiceSdi',
+]);
+
 export function mount(container: HTMLElement): () => void {
   let cleanupHeader: (() => void) | null = null;
   let clienti: ClientePublic[] = [];
   let filter = '';
+  // Handle del modal aperto: serve per chiuderlo se l'utente naviga via
+  // (altrimenti backdrop + listener keydown su document restano orfani).
+  let activeModalClose: (() => void) | null = null;
 
   function matches(c: ClientePublic): boolean {
     if (!filter) return true;
@@ -101,7 +111,7 @@ export function mount(container: HTMLElement): () => void {
   }
 
   function openClienteModal(existing?: ClientePublic): void {
-    openModal({
+    const handle = openModal({
       title: existing ? 'Modifica cliente' : 'Nuovo cliente',
       bodyHtml: formHtml(existing ?? {}),
       onMount: (root, close) => {
@@ -126,7 +136,7 @@ export function mount(container: HTMLElement): () => void {
             const { data } = await lookupPiva(piva);
             // merge SOLO nei campi vuoti — non sovrascrive l'input utente.
             for (const [k, v] of Object.entries(data)) {
-              if (!v) continue;
+              if (!v || !AUTOFILL_KEYS.has(k)) continue;
               const input = form.querySelector<HTMLInputElement>(`[name="${k}"]`);
               if (input && input.value.trim() === '') input.value = String(v);
             }
@@ -148,6 +158,10 @@ export function mount(container: HTMLElement): () => void {
           errorEl.hidden = true;
           const payload = readForm(form);
           try {
+            // payload è un Record costruito dal form; il server ri-valida con
+            // Zod (fonte di verità) e un eventuale errore di campo torna come
+            // 400 VALIDATION mostrato inline. `as never` evita di duplicare il
+            // tipo input Zod lato client.
             if (existing) await updateCliente(existing.id, payload);
             else await createCliente(payload as never);
             close();
@@ -159,6 +173,7 @@ export function mount(container: HTMLElement): () => void {
         });
       },
     });
+    activeModalClose = handle.close;
   }
 
   function renderList(): void {
@@ -215,5 +230,8 @@ export function mount(container: HTMLElement): () => void {
   }
 
   render();
-  return () => { if (cleanupHeader) cleanupHeader(); };
+  return () => {
+    if (cleanupHeader) cleanupHeader();
+    if (activeModalClose) { activeModalClose(); activeModalClose = null; }
+  };
 }
