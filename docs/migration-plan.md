@@ -79,7 +79,7 @@
 - [ ] Export PDF ministeriale con watermark BOZZA + disclaimer
 
 ### Fase 9 — Import legacy + Switch
-- [ ] `scripts/import-from-calcolivari.ts`: accetta uno o più JSON export di CalcoliVari, mappa al nuovo schema, idempotente, dry-run mode
+- [x] `scripts/import-from-calcolivari.ts`: accetta uno o più JSON export di CalcoliVari, mappa al nuovo schema, idempotente, dry-run mode (Slice 3, 2026-06-06)
 - [ ] Test su backup Mattia + Peru
 - [ ] Deploy Fly produzione
 - [ ] User acceptance + 1 settimana parallel run
