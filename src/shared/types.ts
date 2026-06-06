@@ -9,6 +9,12 @@ import {
   ProfileCreateInput as ProfileCreateInputSchema,
   ErrorEnvelope as ErrorEnvelopeSchema,
   HealthResponse as HealthResponseSchema,
+  TipoClienteEnum as TipoClienteEnumSchema,
+  ClienteCreateInput as ClienteCreateInputSchema,
+  ClienteUpdateInput as ClienteUpdateInputSchema,
+  ClientePublic as ClientePublicSchema,
+  PivaLookupData as PivaLookupDataSchema,
+  PivaLookupResult as PivaLookupResultSchema,
 } from './schemas';
 
 export type LoginInput = z.infer<typeof LoginInputSchema>;
@@ -19,3 +25,9 @@ export type ProfilePublic = z.infer<typeof ProfilePublicSchema>;
 export type ProfileCreateInput = z.infer<typeof ProfileCreateInputSchema>;
 export type ErrorEnvelope = z.infer<typeof ErrorEnvelopeSchema>;
 export type HealthResponse = z.infer<typeof HealthResponseSchema>;
+export type TipoCliente = z.infer<typeof TipoClienteEnumSchema>;
+export type ClienteCreateInput = z.infer<typeof ClienteCreateInputSchema>;
+export type ClienteUpdateInput = z.infer<typeof ClienteUpdateInputSchema>;
+export type ClientePublic = z.infer<typeof ClientePublicSchema>;
+export type PivaLookupData = z.infer<typeof PivaLookupDataSchema>;
+export type PivaLookupResult = z.infer<typeof PivaLookupResultSchema>;
