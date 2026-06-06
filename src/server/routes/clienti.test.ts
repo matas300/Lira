@@ -88,14 +88,63 @@ test('single-default: creo 2 clienti default → solo lultimo resta default', as
   assert.equal(list.find((c) => c.id === a.id)!.isDefault, false);
 });
 
-test('scoping: cliente di altro profilo → 404 su PATCH', async () => {
-  const { app: appA, headers: hA } = await makeApp('a@x.it');
-  const { headers: hB, app: appB } = await makeApp('b@x.it');
-  const created = await (await appA.request('/api/clienti', {
-    method: 'POST', headers: J(hA), body: JSON.stringify({ nome: 'A', partitaIva: '00743110157' }),
+test('scoping: due profili nello STESSO db — B non vede né modifica il cliente di A', async () => {
+  // Un solo db condiviso, due utenti/profili distinti: prova che il filtro
+  // profileId nella WHERE isola davvero i dati (non solo l'assenza del record).
+  const { db } = await createTestDb();
+  const a = await createUserWithDefaultProfile({ db, email: 'a@x.it', password: 'pwd-lunga-12345', name: 'A' });
+  const b = await createUserWithDefaultProfile({ db, email: 'b@x.it', password: 'pwd-lunga-12345', name: 'B' });
+  const sa = await createSession(db, a.userId, a.profileId);
+  const sb = await createSession(db, b.userId, b.profileId);
+  const app = new Hono<AuthEnv>();
+  app.use('*', async (c, next) => { c.set('db', db); await next(); });
+  app.onError(errorHandler);
+  app.route('/api/clienti', clientiRoute);
+  const hA = { cookie: `lira_session=${sa.id}`, 'content-type': 'application/json' };
+  const hB = { cookie: `lira_session=${sb.id}`, 'content-type': 'application/json' };
+
+  const created = await (await app.request('/api/clienti', {
+    method: 'POST', headers: hA, body: JSON.stringify({ nome: 'Cliente di A', partitaIva: '00743110157' }),
   })).json() as { id: string };
-  const r = await appB.request(`/api/clienti/${created.id}`, {
-    method: 'PATCH', headers: J(hB), body: JSON.stringify({ citta: 'X' }),
+
+  // B non lo vede nella lista
+  const listB = await (await app.request('/api/clienti', { headers: { cookie: hB.cookie } })).json() as unknown[];
+  assert.equal(listB.length, 0);
+
+  // B non lo può PATCHare → 404
+  const rPatch = await app.request(`/api/clienti/${created.id}`, {
+    method: 'PATCH', headers: hB, body: JSON.stringify({ citta: 'X' }),
   });
-  assert.equal(r.status, 404);
+  assert.equal(rPatch.status, 404);
+
+  // B non lo può DELETEare → 404
+  const rDel = await app.request(`/api/clienti/${created.id}`, { method: 'DELETE', headers: { cookie: hB.cookie } });
+  assert.equal(rDel.status, 404);
+
+  // A invece lo vede ancora (non è stato toccato)
+  const listA = await (await app.request('/api/clienti', { headers: { cookie: hA.cookie } })).json() as unknown[];
+  assert.equal(listA.length, 1);
+});
+
+test('single-default via PATCH: promuovo B → A perde il default', async () => {
+  const { app, headers } = await makeApp();
+  await app.request('/api/clienti', {
+    method: 'POST', headers: J(headers),
+    body: JSON.stringify({ nome: 'A', partitaIva: '00743110157', isDefault: true }),
+  });
+  const b = await (await app.request('/api/clienti', {
+    method: 'POST', headers: J(headers),
+    body: JSON.stringify({ nome: 'B', partitaIva: '07643520567' }),
+  })).json() as { id: string; isDefault: boolean };
+  assert.equal(b.isDefault, false);
+
+  const patched = await (await app.request(`/api/clienti/${b.id}`, {
+    method: 'PATCH', headers: J(headers), body: JSON.stringify({ isDefault: true }),
+  })).json() as { isDefault: boolean };
+  assert.equal(patched.isDefault, true);
+
+  const list = (await (await app.request('/api/clienti', { headers })).json()) as Array<{ nome: string; isDefault: boolean }>;
+  const defaults = list.filter((c) => c.isDefault);
+  assert.equal(defaults.length, 1);
+  assert.equal(defaults[0]!.nome, 'B');
 });

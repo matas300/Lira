@@ -48,8 +48,14 @@ function toPublic(row: ClienteRow) {
 }
 
 function isUniqueViolation(err: unknown): boolean {
+  // Preferisci il codice strutturato del driver libSQL quando presente
+  // (SQLITE_CONSTRAINT_UNIQUE), così NOT NULL / FOREIGN KEY non vengono
+  // scambiati per duplicati. Fallback: match SOLO sul messaggio UNIQUE
+  // (non sul generico "SQLITE_CONSTRAINT", che copre anche NOTNULL/FK).
+  const code = (err as { code?: unknown } | null)?.code;
+  if (typeof code === 'string') return code === 'SQLITE_CONSTRAINT_UNIQUE';
   const msg = err instanceof Error ? err.message : String(err);
-  return /UNIQUE constraint failed|SQLITE_CONSTRAINT/i.test(msg);
+  return /UNIQUE constraint failed/i.test(msg);
 }
 
 async function clearOtherDefaults(tx: any, profileId: string, keepId: string): Promise<void> {
