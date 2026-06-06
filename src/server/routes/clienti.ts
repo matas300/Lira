@@ -16,6 +16,7 @@ import { clienti } from '../db/schema';
 import { HttpError } from '../middleware/error';
 import { zJson } from '../middleware/validate';
 import { requireSession, type AuthEnv } from '../middleware/auth';
+import { lookupPartitaIva } from '../lib/piva-lookup';
 
 export const clientiRoute = new Hono<AuthEnv>();
 clientiRoute.use('*', requireSession);
@@ -181,4 +182,20 @@ clientiRoute.delete('/:id', async (c) => {
   return c.json({ ok: true });
 });
 
-// GET /lookup/:piva — handler added in Task 5. Leave this comment as the marker.
+// ─────────── GET /lookup/:piva ───────────
+clientiRoute.get('/lookup/:piva', async (c) => {
+  const piva = c.req.param('piva');
+  const apiKey = process.env.OPENAPI_COMPANY_KEY;
+  const result = await lookupPartitaIva(piva, { apiKey });
+  if (result.ok) return c.json({ data: result.data ?? {} });
+  switch (result.code) {
+    case 'INVALID_PIVA':
+      throw new HttpError(400, 'INVALID_PIVA', 'Partita IVA non valida (11 cifre)');
+    case 'NO_KEY':
+      throw new HttpError(503, 'AUTOFILL_UNAVAILABLE', 'Autofill non disponibile (chiave API assente)');
+    case 'NOT_FOUND':
+      throw new HttpError(404, 'PIVA_NOT_FOUND', 'Partita IVA non trovata');
+    default:
+      throw new HttpError(502, 'AUTOFILL_ERROR', 'Errore nel servizio di autofill');
+  }
+});

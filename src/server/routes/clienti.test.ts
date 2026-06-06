@@ -148,3 +148,49 @@ test('single-default via PATCH: promuovo B → A perde il default', async () => 
   assert.equal(defaults.length, 1);
   assert.equal(defaults[0]!.nome, 'B');
 });
+
+test('GET /lookup/:piva — 200 con data (fetch + env stubbati)', async () => {
+  const { app, headers } = await makeApp();
+  const prevKey = process.env.OPENAPI_COMPANY_KEY;
+  const prevFetch = globalThis.fetch;
+  process.env.OPENAPI_COMPANY_KEY = 'k';
+  globalThis.fetch = (async () => ({
+    status: 200, ok: true,
+    json: async () => ({ data: [{ companyName: 'ACME SRL' }] }),
+  })) as unknown as typeof fetch;
+  try {
+    const r = await app.request('/api/clienti/lookup/00743110157', { headers });
+    assert.equal(r.status, 200);
+    assert.equal(((await r.json()) as { data: { nome: string } }).data.nome, 'ACME SRL');
+  } finally {
+    globalThis.fetch = prevFetch;
+    if (prevKey === undefined) delete process.env.OPENAPI_COMPANY_KEY;
+    else process.env.OPENAPI_COMPANY_KEY = prevKey;
+  }
+});
+
+test('GET /lookup/:piva — senza key → 503 AUTOFILL_UNAVAILABLE', async () => {
+  const { app, headers } = await makeApp();
+  const prevKey = process.env.OPENAPI_COMPANY_KEY;
+  delete process.env.OPENAPI_COMPANY_KEY;
+  try {
+    const r = await app.request('/api/clienti/lookup/00743110157', { headers });
+    assert.equal(r.status, 503);
+    assert.equal(((await r.json()) as { error: { code: string } }).error.code, 'AUTOFILL_UNAVAILABLE');
+  } finally {
+    if (prevKey !== undefined) process.env.OPENAPI_COMPANY_KEY = prevKey;
+  }
+});
+
+test('GET /lookup/:piva — piva invalida → 400', async () => {
+  const { app, headers } = await makeApp();
+  const prevKey = process.env.OPENAPI_COMPANY_KEY;
+  process.env.OPENAPI_COMPANY_KEY = 'k';
+  try {
+    const r = await app.request('/api/clienti/lookup/123', { headers });
+    assert.equal(r.status, 400);
+  } finally {
+    if (prevKey === undefined) delete process.env.OPENAPI_COMPANY_KEY;
+    else process.env.OPENAPI_COMPANY_KEY = prevKey;
+  }
+});
