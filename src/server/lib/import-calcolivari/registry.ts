@@ -7,13 +7,14 @@ export interface EntitySpec {
   table: any;
   rowsOf: (m: MappedRows) => any[];
   keyOf: (row: any) => string;
+  altKeysOf?: (row: any) => string[]; // chiavi naturali alternative per riconciliazione (es. clienti per P.IVA/CF)
   whereOf: (row: any) => SQL;
   touch: boolean;
 }
 
 export const CHILD_ENTITIES: EntitySpec[] = [
   { name: 'yearSettings', table: yearSettings, rowsOf: (m) => m.yearSettings, keyOf: (r) => `${r.year}`, whereOf: (r) => and(eq(yearSettings.profileId, r.profileId), eq(yearSettings.year, r.year))!, touch: false },
-  { name: 'clienti', table: clienti, rowsOf: (m) => m.clienti, keyOf: (r) => r.id, whereOf: (r) => eq(clienti.id, r.id), touch: true },
+  { name: 'clienti', table: clienti, rowsOf: (m) => m.clienti, keyOf: (r) => r.id, altKeysOf: (r) => [r.partitaIva ? `piva:${r.partitaIva}` : '', r.codiceFiscale ? `cf:${r.codiceFiscale}` : ''].filter((x) => x !== ''), whereOf: (r) => eq(clienti.id, r.id), touch: true },
   { name: 'fatture', table: fatture, rowsOf: (m) => m.fatture, keyOf: (r) => `${r.annoProgressivo}:${r.progressivo}`, whereOf: (r) => and(eq(fatture.profileId, r.profileId), eq(fatture.annoProgressivo, r.annoProgressivo), eq(fatture.progressivo, r.progressivo))!, touch: true },
   { name: 'pagamenti', table: pagamenti, rowsOf: (m) => m.pagamenti, keyOf: (r) => r.id, whereOf: (r) => eq(pagamenti.id, r.id), touch: true },
   { name: 'calendarEntries', table: calendarEntries, rowsOf: (m) => m.calendarEntries, keyOf: (r) => `${r.year}:${r.month}:${r.day}`, whereOf: (r) => and(eq(calendarEntries.profileId, r.profileId), eq(calendarEntries.year, r.year), eq(calendarEntries.month, r.month), eq(calendarEntries.day, r.day))!, touch: true },

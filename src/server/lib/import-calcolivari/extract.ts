@@ -37,7 +37,7 @@ export function extractAll(exp: RawExport): ExtractedData {
   const anagrafica = mergeFirstNonEmpty(docs.map((d) => d.data?.settings?.anagrafica));
   const attivita = mergeFirstNonEmpty(docs.map((d) => d.data?.settings?.attivita));
   const regime = mergeFirstNonEmpty(docs.map((d) => d.data?.settings)).regime ?? null;
-  const displayName = (fiscal.nome as string) ?? [anagrafica.nome, anagrafica.cognome].filter(Boolean).join(' ') ?? null;
+  const displayName = (fiscal.nome as string) ?? ([anagrafica.nome, anagrafica.cognome].filter(Boolean).join(' ') || null);
 
   const clienti = (keyFor(keys, p, 'clienti') as any[]) ?? [];
   const clienteDefaultId = (keyFor(keys, p, 'clienteDefaultId') as string) ?? null;

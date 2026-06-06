@@ -52,7 +52,14 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const inputs = args.files.map((f) => JSON.parse(readFileSync(f, 'utf8')));
+  const inputs = args.files.map((f) => {
+    try {
+      return JSON.parse(readFileSync(f, 'utf8'));
+    } catch (err: any) {
+      console.error(`Impossibile leggere/parsare "${f}": ${err?.message ?? err}`);
+      process.exit(1);
+    }
+  });
   const db = getDb();
 
   try {

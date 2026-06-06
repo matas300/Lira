@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { eq } from 'drizzle-orm';
 import { createTestDb } from '../../db/test-helper';
 import { createUserWithDefaultProfile } from '../../lib/users';
-import { profiles, pagamenti } from '../../db/schema';
+import { profiles, pagamenti, clienti } from '../../db/schema';
 import { buildImportPlan } from './plan';
 import { applyImportPlan } from './apply';
 import { OFFICIAL_SAMPLE } from '../../../test-fixtures/calcolivari-sample';
@@ -49,4 +49,18 @@ test('applyImportPlan: fail-closed su issue di validazione', async () => {
   plan.issues.push({ entity: 'pagamenti', sourceKey: 'x', reason: 'fittizia' });
   await assert.rejects(() => applyImportPlan(db, plan, { commit: true }), /VALIDATION_ISSUES/);
   await applyImportPlan(db, plan, { commit: true, skipInvalid: true });
+});
+
+test('applyImportPlan: cliente con id diverso ma stessa P.IVA → riconciliato (no crash, update)', async () => {
+  const db = await seeded();
+  await applyImportPlan(db, await buildImportPlan(db, [OFFICIAL_SAMPLE], { userEmail: 'mattia@test.it' }), { commit: true });
+  const renamed = JSON.parse(JSON.stringify(OFFICIAL_SAMPLE));
+  renamed['calcoliPIVA_Mattia_clienti'] = [{ id: 'cli-RENUMBERED', nome: 'ACME Spa 2', tipoCliente: 'PG', partitaIva: '99988877766', codiceSDI: 'ABCDEF1' }];
+  renamed['calcoliPIVA_Mattia_clienteDefaultId'] = 'cli-RENUMBERED';
+  const plan2 = await buildImportPlan(db, [renamed], { userEmail: 'mattia@test.it' });
+  assert.equal(plan2.entities['clienti']!.inserts.length, 0); // riconciliato → niente insert
+  await applyImportPlan(db, plan2, { commit: true }); // non deve lanciare unique-constraint
+  const cls = await db.select().from(clienti).where(eq(clienti.profileId, plan2.profileId));
+  assert.equal(cls.length, 1); // un solo cliente, aggiornato non duplicato
+  assert.equal(cls[0]!.nome, 'ACME Spa 2');
 });

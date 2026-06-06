@@ -68,9 +68,19 @@ export async function buildImportPlan(
       ? await db.select().from(spec.table).where(eq(spec.table.profileId, profileId))
       : [];
     const byKey = new Map(existingRows.map((r) => [spec.keyOf(r), r]));
+    const byAlt = new Map<string, any>();
+    if (spec.altKeysOf) {
+      for (const r of existingRows) for (const ak of spec.altKeysOf(r)) byAlt.set(ak, r);
+    }
     const ep: EntityPlan = { entity: spec.name, inserts: [], updates: [], identical: 0 };
     for (const row of rows) {
-      const ex = byKey.get(spec.keyOf(row));
+      let ex = byKey.get(spec.keyOf(row));
+      if (!ex && spec.altKeysOf) {
+        for (const ak of spec.altKeysOf(row)) {
+          const cand = byAlt.get(ak);
+          if (cand) { ex = cand; row.id = cand.id; break; } // riconciliazione: stesso cliente logico (P.IVA/CF), id diverso → update
+        }
+      }
       if (!ex) ep.inserts.push(row);
       else if (rowDiffers(row, ex)) ep.updates.push({ ...row, id: ex.id ?? row.id });
       else ep.identical++;
