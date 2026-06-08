@@ -7,7 +7,7 @@ import { openModal } from '../components/modal';
 import { listClienti } from '../lib/clienti-api';
 import {
   listFatture, createFattura, updateFattura, removeFattura,
-  inviaFattura, pagaFattura,
+  inviaFattura, pagaFattura, downloadFatturaXml,
 } from '../lib/fatture-api';
 import type { FatturaPublic, ClientePublic, Riga } from '@shared/types';
 
@@ -56,12 +56,15 @@ export function mount(container: HTMLElement): () => void {
   function rowHtml(f: FatturaPublic): string {
     const num = f.numeroDisplay ?? '—';
     const stato = f.stato.toUpperCase();
+    const xmlBtn = f.stato !== 'bozza'
+      ? `<button class="btn btn-ghost" data-xml="${esc(f.id)}" title="Scarica XML">XML</button>`
+      : '';
     const azioni = f.stato === 'bozza'
       ? `<button class="btn btn-ghost" data-invia="${esc(f.id)}" title="Segna inviata">✉</button>
          <button class="btn btn-ghost" data-del="${esc(f.id)}" title="Elimina" style="color:var(--red);">✕</button>`
       : f.stato === 'inviata'
-        ? `<button class="btn btn-ghost" data-paga="${esc(f.id)}" title="Segna pagata">€</button>`
-        : '';
+        ? `${xmlBtn}<button class="btn btn-ghost" data-paga="${esc(f.id)}" title="Segna pagata">€</button>`
+        : xmlBtn;
     return `
       <li data-id="${esc(f.id)}" class="fattura-row"
           style="display:grid;grid-template-columns:80px 1fr 90px 90px auto;gap:var(--space-2);align-items:center;
@@ -212,6 +215,10 @@ export function mount(container: HTMLElement): () => void {
       if (!confirm('Eliminare questa bozza?')) return;
       try { await removeFattura(b.dataset.del!); await refresh(); }
       catch (err) { alert(err instanceof ApiError ? err.message : 'Errore'); }
+    }));
+    ul.querySelectorAll<HTMLButtonElement>('[data-xml]').forEach((b) => b.addEventListener('click', async () => {
+      try { await downloadFatturaXml(b.dataset.xml!); }
+      catch (err) { alert(err instanceof ApiError ? err.message : 'Errore generazione XML'); }
     }));
   }
 
