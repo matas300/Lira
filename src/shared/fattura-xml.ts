@@ -158,3 +158,207 @@ export function validateFatturaForXml(input: FatturaXmlInput): string[] {
   }
   return errors;
 }
+
+// ───── Builder XML TD01 ─────
+
+function buildDettaglioLinee(input: FatturaXmlInput): { linee: string[]; rimborsoBollo: boolean } {
+  let n = 0;
+  const linee = input.righe.map((line) => {
+    n++;
+    const qta = parseMaybeNumber(line.quantita) || 1;
+    const pu = round2(parseMaybeNumber(line.prezzoUnitario));
+    const tot = round2(qta * pu);
+    const desc = sanitizeXmlLatin1(line.descrizione || 'Prestazione professionale').slice(0, 1000);
+    return '    <DettaglioLinee>\n'
+      + '      <NumeroLinea>' + n + '</NumeroLinea>\n'
+      + '      <Descrizione>' + xmlEscape(desc) + '</Descrizione>\n'
+      + '      <Quantita>' + fmtXmlNum(qta) + '</Quantita>\n'
+      + '      <PrezzoUnitario>' + fmtXmlNum(pu) + '</PrezzoUnitario>\n'
+      + '      <PrezzoTotale>' + fmtXmlNum(tot) + '</PrezzoTotale>\n'
+      + '      <AliquotaIVA>0.00</AliquotaIVA>\n'
+      + '      <Natura>N2.2</Natura>\n'
+      + '    </DettaglioLinee>';
+  });
+  const rimborsoBollo = input.marcaDaBollo && input.bolloAddebitato && round2(input.importo) > SOGLIA_BOLLO;
+  if (rimborsoBollo) {
+    n++;
+    linee.push('    <DettaglioLinee>\n'
+      + '      <NumeroLinea>' + n + '</NumeroLinea>\n'
+      + '      <Descrizione>Rimborso imposta di bollo</Descrizione>\n'
+      + '      <Quantita>1.00</Quantita>\n'
+      + '      <PrezzoUnitario>2.00</PrezzoUnitario>\n'
+      + '      <PrezzoTotale>2.00</PrezzoTotale>\n'
+      + '      <AliquotaIVA>0.00</AliquotaIVA>\n'
+      + '      <Natura>N1</Natura>\n'
+      + '    </DettaglioLinee>');
+  }
+  return { linee, rimborsoBollo };
+}
+
+function buildCessionarioFiscale(c: ClienteSnapshotXml): string {
+  const naz = (s(c.nazione) || 'IT').slice(0, 2).toUpperCase();
+  const estero = naz !== 'IT';
+  const pivaRaw = s(c.partitaIva).replace(/\s+/g, '');
+  const cf = s(c.codiceFiscale).toUpperCase();
+  if (estero) {
+    const vat = (pivaRaw || cf);
+    if (!vat) return '';
+    const codice = vat.replace(new RegExp('^' + naz, 'i'), '').trim() || vat;
+    return '\n        <IdFiscaleIVA>\n          <IdPaese>' + naz + '</IdPaese>\n          <IdCodice>'
+      + xmlEscape(codice) + '</IdCodice>\n        </IdFiscaleIVA>';
+  }
+  if (isValidPartitaIvaIT(pivaRaw)) {
+    let out = '\n        <IdFiscaleIVA>\n          <IdPaese>IT</IdPaese>\n          <IdCodice>'
+      + xmlEscape(pivaRaw) + '</IdCodice>\n        </IdFiscaleIVA>';
+    if (cf) out += '\n        <CodiceFiscale>' + xmlEscape(cf) + '</CodiceFiscale>';
+    return out;
+  }
+  if (!cf) return '';
+  return '\n        <CodiceFiscale>' + xmlEscape(cf) + '</CodiceFiscale>';
+}
+
+/** Genera l'XML FatturaPA v1.2 TD01. Assume input gia' validato (validateFatturaForXml). */
+export function buildFatturaXml(input: FatturaXmlInput): string {
+  const ced = input.cedente;
+  const c = input.cliente;
+  const regimeFiscale = regimeToRF(ced.regime);
+  const progressivo = sanitizeProgressivoInvio(input.numero);
+  const piva = s(ced.partitaIva).replace(/\s+/g, '');
+
+  // IdTrasmittente.IdCodice: per persona fisica (CF 16 char) usa il CF, non la
+  // P.IVA (SdI scarta con 00300). Per PG il CF coincide con la P.IVA.
+  const cf = s(ced.codiceFiscale).toUpperCase();
+  const isPF = /^[A-Z0-9]{16}$/.test(cf);
+  const trasmittenteIdCodice = isPF ? cf : piva;
+
+  const naz = (s(c.nazione) || 'IT').slice(0, 2).toUpperCase();
+  const estero = naz !== 'IT';
+  const isPA = c.tipoCliente === 'PA';
+  const pivaCli = s(c.partitaIva).replace(/\s+/g, '');
+  const codiceSDI = estero
+    ? 'XXXXXXX'
+    : (isPA
+        ? s(c.codiceSdi).toUpperCase()
+        : (isValidPartitaIvaIT(pivaCli)
+            ? (s(c.codiceSdi) || '0000000').padEnd(7, '0').slice(0, 7)
+            : (s(c.codiceSdi) || '0000000')));
+
+  const imponibile = round2(input.importo);
+  const naturaLinea = 'N2.2';
+  const riferimentoNormativo = "Regime forfettario: operazione in franchigia IVA e senza ritenuta d'acconto Art.1 c.54-89 L.190/2014";
+
+  const { linee, rimborsoBollo } = buildDettaglioLinee(input);
+
+  const datiBollo = (input.marcaDaBollo && imponibile > SOGLIA_BOLLO)
+    ? '\n      <DatiBollo>\n        <BolloVirtuale>SI</BolloVirtuale>\n        <ImportoBollo>2.00</ImportoBollo>\n      </DatiBollo>'
+    : '';
+
+  // DatiGeneraliDocumento — ordine XSD: TipoDocumento, Divisa, Data, Numero, DatiBollo, ImportoTotaleDocumento
+  const importoTotale = round2(input.importo + (rimborsoBollo ? 2 : 0));
+  const dggParts: string[] = [];
+  dggParts.push('<TipoDocumento>TD01</TipoDocumento>');
+  dggParts.push('<Divisa>EUR</Divisa>');
+  dggParts.push('<Data>' + xmlEscape(input.data) + '</Data>');
+  dggParts.push('<Numero>' + xmlEscape(input.numero) + '</Numero>');
+  if (datiBollo.trim()) dggParts.push(datiBollo.trim());
+  dggParts.push('<ImportoTotaleDocumento>' + fmtXmlNum(importoTotale) + '</ImportoTotaleDocumento>');
+  const datiGeneraliDocumentoXml = '<DatiGeneraliDocumento>' + dggParts.join('') + '</DatiGeneraliDocumento>';
+
+  const cessionarioFiscaleXml = buildCessionarioFiscale(c);
+
+  const cedInd = xmlEscape(sanitizeXmlLatin1(ced.indirizzo).slice(0, 60));
+  const cedCap = s(ced.cap).replace(/\D/g, '').padStart(5, '0').slice(0, 5);
+  const cedCom = xmlEscape(sanitizeXmlLatin1(ced.comune).slice(0, 60));
+  const cedProv = s(ced.provincia).slice(0, 2).toUpperCase();
+  const cedProvXml = cedProv ? '\n        <Provincia>' + xmlEscape(cedProv) + '</Provincia>' : '';
+  const cfCedenteXml = cf ? '\n        <CodiceFiscale>' + xmlEscape(cf) + '</CodiceFiscale>' : '';
+
+  const cliInd = xmlEscape(sanitizeXmlLatin1(c.indirizzo || '').slice(0, 60));
+  const cliCap = estero
+    ? (s(c.cap).replace(/\D/g, '').padStart(5, '0').slice(0, 5) || '00000')
+    : s(c.cap).replace(/\D/g, '').padStart(5, '0').slice(0, 5);
+  const cliCom = xmlEscape(sanitizeXmlLatin1(c.citta || '').slice(0, 60));
+  const cliProv = estero ? '' : s(c.provincia).slice(0, 2).toUpperCase();
+  const cliProvXml = cliProv ? '\n        <Provincia>' + xmlEscape(cliProv) + '</Provincia>' : '';
+
+  const datiPagamento = estero ? '' : `
+    <DatiPagamento>
+      <CondizioniPagamento>TP02</CondizioniPagamento>
+      <DettaglioPagamento>
+        <ModalitaPagamento>${modalitaToCodiceMP(input.modalitaPagamento)}</ModalitaPagamento>
+        <ImportoPagamento>${fmtXmlNum(round2(importoTotale - (Number(input.ritenuta) || 0)))}</ImportoPagamento>
+      </DettaglioPagamento>
+    </DatiPagamento>`;
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<p:FatturaElettronica versione="FPR12"
+  xmlns:p="${XML_NAMESPACE}"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="${XML_NAMESPACE} http://www.fatturapa.gov.it/export/fatturazione/sdi/fatturapa/v1.2/Schema_del_file_xml_FatturaPA_versione_1.2.xsd">
+  <FatturaElettronicaHeader>
+    <DatiTrasmissione>
+      <IdTrasmittente>
+        <IdPaese>IT</IdPaese>
+        <IdCodice>${xmlEscape(trasmittenteIdCodice)}</IdCodice>
+      </IdTrasmittente>
+      <ProgressivoInvio>${progressivo}</ProgressivoInvio>
+      <FormatoTrasmissione>FPR12</FormatoTrasmissione>
+      <CodiceDestinatario>${codiceSDI}</CodiceDestinatario>
+    </DatiTrasmissione>
+    <CedentePrestatore>
+      <DatiAnagrafici>
+        <IdFiscaleIVA>
+          <IdPaese>IT</IdPaese>
+          <IdCodice>${xmlEscape(piva)}</IdCodice>
+        </IdFiscaleIVA>${cfCedenteXml}
+        <Anagrafica>
+          <Nome>${xmlEscape(sanitizeXmlLatin1(ced.nome).slice(0, 60))}</Nome>
+          <Cognome>${xmlEscape(sanitizeXmlLatin1(ced.cognome).slice(0, 60))}</Cognome>
+        </Anagrafica>
+        <RegimeFiscale>${regimeFiscale}</RegimeFiscale>
+      </DatiAnagrafici>
+      <Sede>
+        <Indirizzo>${cedInd}</Indirizzo>
+        <CAP>${cedCap}</CAP>
+        <Comune>${cedCom}</Comune>${cedProvXml}
+        <Nazione>${ced.nazione}</Nazione>
+      </Sede>
+    </CedentePrestatore>
+    <CessionarioCommittente>
+      <DatiAnagrafici>${cessionarioFiscaleXml}
+        <Anagrafica>
+          ${buildAnagraficaCessionario(c)}
+        </Anagrafica>
+      </DatiAnagrafici>
+      <Sede>
+        <Indirizzo>${cliInd}</Indirizzo>
+        <CAP>${cliCap}</CAP>
+        <Comune>${cliCom}</Comune>${cliProvXml}
+        <Nazione>${naz}</Nazione>
+      </Sede>
+    </CessionarioCommittente>
+  </FatturaElettronicaHeader>
+  <FatturaElettronicaBody>
+    <DatiGenerali>
+      ${datiGeneraliDocumentoXml}
+    </DatiGenerali>
+    <DatiBeniServizi>
+${linee.join('\n')}
+      <DatiRiepilogo>
+        <AliquotaIVA>0.00</AliquotaIVA>
+        <Natura>${naturaLinea}</Natura>
+        <ImponibileImporto>${fmtXmlNum(imponibile)}</ImponibileImporto>
+        <Imposta>0.00</Imposta>
+        <RiferimentoNormativo>${xmlEscape(riferimentoNormativo)}</RiferimentoNormativo>
+      </DatiRiepilogo>${rimborsoBollo ? `
+      <DatiRiepilogo>
+        <AliquotaIVA>0.00</AliquotaIVA>
+        <Natura>N1</Natura>
+        <ImponibileImporto>2.00</ImponibileImporto>
+        <Imposta>0.00</Imposta>
+        <RiferimentoNormativo>Rimborso imposta di bollo - Escluso art. 15 DPR 633/72 (Ris. AdE 444/E 2008)</RiferimentoNormativo>
+      </DatiRiepilogo>` : ''}
+    </DatiBeniServizi>${datiPagamento}
+  </FatturaElettronicaBody>
+</p:FatturaElettronica>`;
+}

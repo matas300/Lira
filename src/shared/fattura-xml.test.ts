@@ -103,3 +103,54 @@ test('validateFatturaForXml — sede cliente incompleta -> errore', () => {
   const errs = validateFatturaForXml({ ...inputBase(), cliente: { ...clienteIT, cap: '' } });
   assert.ok(errs.some((e) => /CAP/i.test(e)));
 });
+
+// ───── buildFatturaXml (Task 4) ─────
+import { buildFatturaXml } from './fattura-xml';
+
+test('buildFatturaXml — struttura TD01 forfettario, N2.2, bollo, no ritenuta', () => {
+  const xml = buildFatturaXml(inputBase());
+  assert.match(xml, /versione="FPR12"/);
+  assert.match(xml, /<TipoDocumento>TD01<\/TipoDocumento>/);
+  assert.match(xml, /<RegimeFiscale>RF19<\/RegimeFiscale>/);
+  assert.match(xml, /<Numero>2026\/1<\/Numero>/);
+  assert.match(xml, /<Natura>N2\.2<\/Natura>/);
+  assert.match(xml, /<DatiBollo>\s*<BolloVirtuale>SI<\/BolloVirtuale>\s*<ImportoBollo>2\.00<\/ImportoBollo>/);
+  assert.ok(!/<DatiRitenuta>/.test(xml));
+  assert.match(xml, /<ImponibileImporto>1000\.00<\/ImponibileImporto>/);
+  assert.match(xml, /<CodiceDestinatario>0000000<\/CodiceDestinatario>/);
+});
+
+test('buildFatturaXml — ordine elementi DatiGeneraliDocumento', () => {
+  const xml = buildFatturaXml(inputBase());
+  const iTipo = xml.indexOf('<TipoDocumento>');
+  const iDivisa = xml.indexOf('<Divisa>');
+  const iData = xml.indexOf('<Data>');
+  const iNumero = xml.indexOf('<Numero>');
+  const iTot = xml.indexOf('<ImportoTotaleDocumento>');
+  assert.ok(iTipo < iDivisa && iDivisa < iData && iData < iNumero && iNumero < iTot, 'ordine elementi errato');
+});
+
+test('buildFatturaXml — cedente IdTrasmittente usa CF per persona fisica', () => {
+  const xml = buildFatturaXml(inputBase());
+  assert.match(xml, /<IdTrasmittente>\s*<IdPaese>IT<\/IdPaese>\s*<IdCodice>RSSMRA80A01H501U<\/IdCodice>/);
+});
+
+test('buildFatturaXml — cliente PA usa IPA 6; estero senza DatiPagamento', () => {
+  const pa = buildFatturaXml({ ...inputBase(), cliente: { ...inputBase().cliente, tipoCliente: 'PA', codiceSdi: 'UF1234' } });
+  assert.match(pa, /<CodiceDestinatario>UF1234<\/CodiceDestinatario>/);
+
+  const estero = buildFatturaXml({
+    ...inputBase(),
+    cliente: { nome: 'Foreign Co', tipoCliente: 'Estero', partitaIva: 'DE123', codiceFiscale: null,
+      codiceSdi: '', pec: null, indirizzo: 'Strasse 1', cap: '10115', citta: 'Berlin', provincia: '', nazione: 'DE' },
+  });
+  assert.match(estero, /<CodiceDestinatario>XXXXXXX<\/CodiceDestinatario>/);
+  assert.match(estero, /<Nazione>DE<\/Nazione>/);
+  assert.ok(!/<DatiPagamento>/.test(estero));
+});
+
+test('buildFatturaXml — rimborso bollo addebitato -> riga + DatiRiepilogo N1', () => {
+  const xml = buildFatturaXml({ ...inputBase(), bolloAddebitato: true });
+  assert.match(xml, /<Descrizione>Rimborso imposta di bollo<\/Descrizione>/);
+  assert.match(xml, /<Natura>N1<\/Natura>/);
+});
