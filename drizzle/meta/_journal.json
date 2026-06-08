@@ -15,6 +15,13 @@
       "when": 1780669438677,
       "tag": "0001_audit_fixes_year_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1780910401187,
+      "tag": "0002_absent_logan",
+      "breakpoints": true
     }
   ]
 }
