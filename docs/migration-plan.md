@@ -37,9 +37,9 @@
 - [x] Validation server-side: P.IVA IT check-digit, CF formato, SDI/IPA per tipo, PEC; envelope `400 VALIDATION` (Slice 4A, 2026-06-06)
 
 ### Fase 5 — Fatture (modulo principale)
-- [ ] Wizard 3-step creazione
-- [ ] Storico fatture (tabella, filtri, stato)
-- [ ] State machine bozza → inviata → pagata; ortogonale NC TD04 → stornata
+- [x] Creazione fattura via modal (TD01) + numerazione atomica all'invio (Slice 5A, 2026-06-08)
+- [x] Storico fatture (tabella, filtri, stato) + pagina `/fatture` (Slice 5A, 2026-06-08)
+- [x] State machine bozza → inviata → pagata (+ annulla-pagamento); NC TD04 → stornata rinviata a 5B (Slice 5A, 2026-06-08)
 - [ ] Generazione XML FatturaPA v1.2 (TD01 + TD04) — porta logica da CalcoliVari
 - [ ] PDF (jspdf) — porta layout minimalista
 - [ ] Validators server-side (regime/ritenuta, IPA, prefisso paese UE, ecc.)
