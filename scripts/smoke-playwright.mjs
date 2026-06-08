@@ -141,6 +141,62 @@ async function main() {
     check('Cliente row found for default toggle', false, 'row not found');
   }
 
+  // ─── STEP 4C: Fatture — crea bozza → invia → paga (Slice 5A) ───
+  console.log('\n=== STEP 4C: Fatture (bozza → invia → paga) ===');
+  // bottom-nav.ts: <a data-route="/fatture">; navigate via SPA router (fallback goto)
+  const fattureTab = page.locator('[data-route="/fatture"]').first();
+  if ((await fattureTab.count()) > 0) {
+    await fattureTab.click();
+  } else {
+    await page.goto(`${BASE_URL}/fatture`, { waitUntil: 'networkidle' });
+  }
+  await page.waitForTimeout(1500);
+  const urlFatture = page.url();
+  check('On /fatture page', urlFatture.includes('/fatture'), `url=${urlFatture}`);
+  await screenshot(page, '05f-fatture-page');
+
+  // Crea una bozza: il cliente default ("Smoke Cliente SpA") è già selezionato.
+  await page.click('[data-new]');
+  await page.waitForTimeout(500);
+  await page.fill('[data-form] [data-riga-desc]', 'Consulenza smoke');
+  await page.fill('[data-form] [data-riga-prezzo]', '1000');
+  await screenshot(page, '05g-fattura-form');
+  await page.click('[data-form] button[type="submit"]');
+  await page.waitForTimeout(1500);
+  await page.keyboard.press('Escape').catch(() => {});
+  await page.waitForTimeout(300);
+  const rowsAfterCreate = await page.locator('.fattura-row').count();
+  check('Bozza fattura creata (riga in lista)', rowsAfterCreate > 0, `rows=${rowsAfterCreate}`);
+  await screenshot(page, '05h-fattura-bozza');
+
+  // Invia la prima (più recente in cima per data/createdAt) → ottiene numero AAAA/N.
+  const inviaBtn = page.locator('[data-invia]').first();
+  if ((await inviaBtn.count()) > 0) {
+    await inviaBtn.click();
+    await page.waitForTimeout(1500);
+    const listFatt = await page.textContent('[data-list]').catch(() => '');
+    check('Fattura inviata con numero (AAAA/N)', /\d{4}\/\d+/.test(listFatt || ''),
+      `list="${(listFatt || '').slice(0, 140)}"`);
+    await screenshot(page, '05i-fattura-inviata');
+  } else {
+    check('Pulsante invia presente', false, 'nessun [data-invia]');
+  }
+
+  // Segna pagata: il bottone € apre un prompt(date) → lo accetto con la data odierna.
+  const pagaBtn = page.locator('[data-paga]').first();
+  if ((await pagaBtn.count()) > 0) {
+    const today = new Date().toISOString().slice(0, 10);
+    page.once('dialog', (d) => d.accept(today));
+    await pagaBtn.click();
+    await page.waitForTimeout(1500);
+    const listFatt2 = await page.textContent('[data-list]').catch(() => '');
+    check('Fattura segnata PAGATA', !!listFatt2 && listFatt2.includes('PAGATA'),
+      `list="${(listFatt2 || '').slice(0, 140)}"`);
+    await screenshot(page, '05j-fattura-pagata');
+  } else {
+    check('Pulsante paga presente', false, 'nessun [data-paga]');
+  }
+
   // Torno alla dashboard per non perturbare gli step profili successivi
   await page.goto(BASE_URL, { waitUntil: 'networkidle' });
   await page.waitForTimeout(1000);

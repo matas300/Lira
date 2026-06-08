@@ -120,8 +120,8 @@ export const fatture = sqliteTable(
     clienteId: text('cliente_id').references(() => clienti.id, { onDelete: 'set null' }),
     tipoDocumento: text('tipo_documento').notNull().default('TD01'),
     annoProgressivo: integer('anno_progressivo').notNull(),
-    progressivo: integer('progressivo').notNull(),
-    numeroDisplay: text('numero_display').notNull(),
+    progressivo: integer('progressivo'),
+    numeroDisplay: text('numero_display'),
     data: text('data').notNull(),
     clienteSnapshot: text('cliente_snapshot'), // JSON
     righe: text('righe').notNull(), // JSON

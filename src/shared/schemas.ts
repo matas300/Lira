@@ -228,3 +228,70 @@ export const PivaLookupResult = z.object({
   data: PivaLookupData.optional(),
   code: z.string().optional(),
 });
+
+// ───── Fatture (Slice 5A) ─────
+
+export const StatoFatturaEnum = z.enum(['bozza', 'inviata', 'pagata', 'stornata', 'annullata']);
+export const TipoDocumentoEnum = z.enum(['TD01', 'TD04', 'TD24']);
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+export const RigaSchema = z.object({
+  descrizione: z.string().trim().min(1).max(1000),
+  quantita: z.number().positive().default(1),
+  prezzoUnitario: z.number(),
+});
+
+export const FatturaCreateInput = z.object({
+  clienteId: z.string().min(1),
+  tipoDocumento: TipoDocumentoEnum.default('TD01'),
+  data: z.string().regex(ISO_DATE, 'Data attesa in formato YYYY-MM-DD'),
+  righe: z.array(RigaSchema).min(1, 'Almeno una riga'),
+  ritenuta: z.number().min(0).default(0),
+  aliquotaRitenuta: z.number().optional().nullable(),
+  tipoRitenuta: z.string().trim().optional().nullable(),
+  causaleRitenuta: z.string().trim().optional().nullable(),
+  contributoIntegrativo: z.number().min(0).default(0),
+  marcaDaBollo: z.boolean().default(false),
+  bolloAddebitato: z.boolean().default(false),
+  modalitaPagamento: z.string().trim().optional().nullable(),
+  note: z.string().trim().optional().nullable(),
+});
+
+export const FatturaUpdateInput = FatturaCreateInput.partial();
+
+const RigaPublic = z.object({
+  descrizione: z.string(),
+  quantita: z.number(),
+  prezzoUnitario: z.number(),
+});
+
+export const FatturaPublic = z.object({
+  id: z.string(),
+  profileId: z.string(),
+  clienteId: z.string().nullable(),
+  tipoDocumento: TipoDocumentoEnum,
+  annoProgressivo: z.number(),
+  progressivo: z.number().nullable(),
+  numeroDisplay: z.string().nullable(),
+  data: z.string(),
+  clienteSnapshot: z.record(z.unknown()).nullable(),
+  righe: z.array(RigaPublic),
+  importo: z.number(),
+  ritenuta: z.number(),
+  aliquotaRitenuta: z.number().nullable(),
+  tipoRitenuta: z.string().nullable(),
+  causaleRitenuta: z.string().nullable(),
+  contributoIntegrativo: z.number(),
+  marcaDaBollo: z.boolean(),
+  bolloAddebitato: z.boolean(),
+  stato: StatoFatturaEnum,
+  dataInvioSdi: z.string().nullable(),
+  dataPagamento: z.string().nullable(),
+  pagMese: z.number().nullable(),
+  pagAnno: z.number().nullable(),
+  modalitaPagamento: z.string().nullable(),
+  note: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});

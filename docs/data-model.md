@@ -96,8 +96,8 @@ PK composito `(profile_id, year)`.
 | cliente_id | text FK clienti | nullable per legacy import |
 | tipo_documento | text | 'TD01' \| 'TD04' \| 'TD24' (default 'TD01') |
 | anno_progressivo | integer | YYYY |
-| progressivo | integer | NNN |
-| numero_display | text | "YYYY/NNN" computed (denormalizzato per ricerca) |
+| progressivo | integer | NNN — nullable (assegnato all'invio; bozze senza numero) |
+| numero_display | text | "YYYY/NNN" computed (denormalizzato per ricerca) — nullable (assegnato all'invio; bozze senza numero) |
 | data | text | ISO YYYY-MM-DD |
 | cliente_snapshot | text JSON | snapshot dati cliente al momento dell'emissione |
 | righe | text JSON | array `[{descrizione, quantita, prezzo_unitario, ...}]` |
