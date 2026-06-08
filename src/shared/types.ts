@@ -15,6 +15,12 @@ import {
   ClientePublic as ClientePublicSchema,
   PivaLookupData as PivaLookupDataSchema,
   PivaLookupResult as PivaLookupResultSchema,
+  StatoFatturaEnum as StatoFatturaEnumSchema,
+  TipoDocumentoEnum as TipoDocumentoEnumSchema,
+  RigaSchema as RigaSchemaSchema,
+  FatturaCreateInput as FatturaCreateInputSchema,
+  FatturaUpdateInput as FatturaUpdateInputSchema,
+  FatturaPublic as FatturaPublicSchema,
 } from './schemas';
 
 export type LoginInput = z.infer<typeof LoginInputSchema>;
@@ -31,3 +37,9 @@ export type ClienteUpdateInput = z.infer<typeof ClienteUpdateInputSchema>;
 export type ClientePublic = z.infer<typeof ClientePublicSchema>;
 export type PivaLookupData = z.infer<typeof PivaLookupDataSchema>;
 export type PivaLookupResult = z.infer<typeof PivaLookupResultSchema>;
+export type StatoFattura = z.infer<typeof StatoFatturaEnumSchema>;
+export type TipoDocumento = z.infer<typeof TipoDocumentoEnumSchema>;
+export type Riga = z.infer<typeof RigaSchemaSchema>;
+export type FatturaCreateInput = z.infer<typeof FatturaCreateInputSchema>;
+export type FatturaUpdateInput = z.infer<typeof FatturaUpdateInputSchema>;
+export type FatturaPublic = z.infer<typeof FatturaPublicSchema>;

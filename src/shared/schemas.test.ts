@@ -42,3 +42,33 @@ test('ClienteCreateInput — PA richiede SDI 6 char', () => {
   });
   assert.equal(ok.codiceSdi, 'UFXXXX');
 });
+
+// ───── Fatture (Slice 5A) ─────
+import { FatturaCreateInput, RigaSchema } from './schemas';
+
+test('RigaSchema — quantità default 1, prezzo richiesto', () => {
+  const r = RigaSchema.parse({ descrizione: 'Consulenza', prezzoUnitario: 100 });
+  assert.equal(r.quantita, 1);
+  assert.equal(r.prezzoUnitario, 100);
+});
+
+test('FatturaCreateInput — minimo valido (default TD01, ritenuta 0)', () => {
+  const f = FatturaCreateInput.parse({
+    clienteId: 'c1', data: '2026-03-01',
+    righe: [{ descrizione: 'x', prezzoUnitario: 500 }],
+  });
+  assert.equal(f.tipoDocumento, 'TD01');
+  assert.equal(f.ritenuta, 0);
+  assert.equal(f.marcaDaBollo, false);
+  assert.equal(f.righe[0]!.quantita, 1);
+});
+
+test('FatturaCreateInput — righe vuote → throw', () => {
+  assert.throws(() => FatturaCreateInput.parse({ clienteId: 'c1', data: '2026-03-01', righe: [] }));
+});
+
+test('FatturaCreateInput — data non ISO → throw', () => {
+  assert.throws(() => FatturaCreateInput.parse({
+    clienteId: 'c1', data: '01/03/2026', righe: [{ descrizione: 'x', prezzoUnitario: 1 }],
+  }));
+});
