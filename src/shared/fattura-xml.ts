@@ -5,6 +5,8 @@
 // Solo TD01 (no note di credito): importi sempre positivi.
 
 import { SOGLIA_BOLLO } from './fattura-logic';
+import { isValidPartitaIvaIT, isValidCodiceFiscaleFormat } from './validators';
+import type { Cedente } from './cedente';
 
 export const XML_NAMESPACE = 'http://ivaservizi.agenziaentrate.gov.it/docs/xsd/fatture/v1.2';
 
@@ -86,3 +88,73 @@ export function buildAnagraficaCessionario(cliente: { nome?: string | null }): s
 }
 
 export { SOGLIA_BOLLO };
+
+// ───── Tipi input + validazione fattura per XML ─────
+
+export interface ClienteSnapshotXml {
+  nome?: string | null;
+  tipoCliente?: string | null;
+  partitaIva?: string | null;
+  codiceFiscale?: string | null;
+  codiceSdi?: string | null;
+  pec?: string | null;
+  indirizzo?: string | null;
+  cap?: string | null;
+  citta?: string | null;
+  provincia?: string | null;
+  nazione?: string | null;
+}
+
+export interface FatturaXmlInput {
+  cedente: Cedente;
+  cliente: ClienteSnapshotXml;
+  numero: string;
+  data: string;
+  righe: Array<{ descrizione: string; quantita: number; prezzoUnitario: number }>;
+  importo: number;
+  ritenuta: number;
+  aliquotaRitenuta: number | null;
+  tipoRitenuta: string | null;
+  causaleRitenuta: string | null;
+  marcaDaBollo: boolean;
+  bolloAddebitato: boolean;
+  modalitaPagamento: string | null;
+  contributoIntegrativo: number;
+}
+
+/** Helper stringa locale (trim, null-safe). Usato da validate + builder. */
+function s(v: unknown): string {
+  return v == null ? '' : String(v).trim();
+}
+
+/** Validazione fail-fast della fattura per l'XML. Ritorna [] se ok. */
+export function validateFatturaForXml(input: FatturaXmlInput): string[] {
+  const errors: string[] = [];
+  if (!input.numero) errors.push('Numero fattura mancante (la fattura deve essere inviata).');
+  if (!input.data) errors.push('Data fattura mancante.');
+  if (!(Number(input.importo) > 0)) errors.push('Importo totale della fattura pari a zero.');
+  if (Number(input.contributoIntegrativo) > 0) {
+    errors.push('Contributo integrativo non supportato in XML (gestione separata INPS non lo prevede): azzera il campo.');
+  }
+  if (input.cedente.regime === 'forfettario' && Number(input.ritenuta) > 0) {
+    errors.push('Regime forfettario esonerato dalla ritenuta d\'acconto (art. 1 c. 67 L. 190/2014): rimuovi la ritenuta.');
+  }
+  const c = input.cliente;
+  if (!c || !s(c.nome)) {
+    errors.push('Cliente senza denominazione.');
+  } else {
+    if (!s(c.indirizzo)) errors.push('Indirizzo del cliente mancante.');
+    if (!s(c.cap)) errors.push('CAP del cliente mancante.');
+    if (!s(c.citta)) errors.push('Comune del cliente mancante.');
+    const naz = (s(c.nazione) || 'IT').toUpperCase();
+    if (naz === 'IT') {
+      const hasPiva = isValidPartitaIvaIT(s(c.partitaIva).replace(/\s+/g, ''));
+      const hasCf = isValidCodiceFiscaleFormat(s(c.codiceFiscale).toUpperCase());
+      if (!hasPiva && !hasCf) errors.push('Cliente IT senza P.IVA valida né Codice Fiscale: SdI rifiuterà l\'XML.');
+    }
+    if (c.tipoCliente === 'PA' && !/^[A-Z0-9]{6}$/i.test(s(c.codiceSdi))) {
+      errors.push('Cliente PA: il Codice IPA deve essere 6 caratteri alfanumerici (D.M. 55/2013 art. 2).');
+    }
+  }
+  return errors;
+}
