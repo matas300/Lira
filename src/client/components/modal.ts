@@ -12,6 +12,16 @@ interface ModalOpts {
   onMount?: (root: HTMLElement, close: () => void) => void;
 }
 
+// Il title è testo semplice e va escapato prima di finire in innerHTML
+// (difesa-in-profondità: oggi i title sono statici o numeri fattura, ma il
+// componente è riusabile e non deve mai diventare un vettore XSS).
+// bodyHtml resta raw: i chiamanti lo costruiscono già con il proprio esc().
+function esc(v: string): string {
+  return v.replace(/[&<>"']/g, (ch) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]!
+  ));
+}
+
 export function openModal(opts: ModalOpts): { close: () => void; root: HTMLElement } {
   const backdrop = document.createElement('div');
   backdrop.className = 'modal-backdrop';
@@ -28,7 +38,7 @@ export function openModal(opts: ModalOpts): { close: () => void; root: HTMLEleme
     + 'box-shadow:var(--shadow-modal);max-width:560px;width:100%;max-height:90vh;overflow:auto;padding:var(--space-5);';
   dialog.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-4);">
-      <h3 style="margin:0;">${opts.title}</h3>
+      <h3 style="margin:0;">${esc(opts.title)}</h3>
       <button type="button" class="btn btn-ghost" data-modal-close aria-label="Chiudi">✕</button>
     </div>
     <div data-modal-body>${opts.bodyHtml}</div>
