@@ -9,7 +9,7 @@
 // - DELETE solo su bozza. Transizioni (invia/paga/annulla) in coda al file.
 
 import { Hono } from 'hono';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { FatturaCreateInput, FatturaUpdateInput } from '@shared/schemas';
@@ -59,6 +59,9 @@ export function toPublic(row: FatturaRow) {
     righe: parseJson<Array<{ descrizione: string; quantita: number; prezzoUnitario: number }>>(row.righe, []),
     importo: row.importo,
     ritenuta: row.ritenuta,
+    aliquotaRitenuta: row.aliquotaRitenuta,
+    tipoRitenuta: row.tipoRitenuta,
+    causaleRitenuta: row.causaleRitenuta,
     contributoIntegrativo: row.contributoIntegrativo,
     marcaDaBollo: row.marcaDaBollo === 1,
     bolloAddebitato: row.bolloAddebitato === 1,
@@ -208,19 +211,6 @@ fattureRoute.delete('/:id', async (c) => {
 
 // ════════════ Transizioni (state machine) ════════════
 
-/**
- * Rileva una violazione UNIQUE (per il retry sulla numerazione concorrente).
- * Preferisce il codice strutturato del driver libSQL; fallback sul messaggio
- * SOLO sul testo UNIQUE (no generico SQLITE_CONSTRAINT → niente NOTNULL/FK).
- * Coerente con routes/clienti.ts.
- */
-function isUniqueViolation(err: unknown): boolean {
-  const code = (err as { code?: unknown } | null)?.code;
-  if (typeof code === 'string') return code === 'SQLITE_CONSTRAINT_UNIQUE';
-  const msg = err instanceof Error ? err.message : String(err);
-  return /UNIQUE constraint failed/i.test(msg);
-}
-
 /** Regime dell'anno per il profilo; default forfettario se non configurato. */
 async function regimeFor(db: Db, profileId: string, year: number): Promise<string> {
   const [ys] = await db.select().from(yearSettings)
@@ -255,28 +245,29 @@ fattureRoute.post('/:id/invia', async (c) => {
   const bolloFlag = isBolloDovuto(regime, f.importo) ? 1 : f.marcaDaBollo;
 
   const iso = todayIso();
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      await db.transaction(async (tx) => {
-        const rows = await tx.select({ p: fatture.progressivo }).from(fatture)
-          .where(and(eq(fatture.profileId, profileId), eq(fatture.annoProgressivo, anno)));
-        let max = 0;
-        for (const r of rows) if (r.p != null && r.p > max) max = r.p;
-        const next = max + 1;
-        await tx.update(fatture).set({
-          progressivo: next,
-          numeroDisplay: `${anno}/${next}`,
-          stato: 'inviata',
-          dataInvioSdi: iso,
-          marcaDaBollo: bolloFlag,
-          updatedAt: new Date().toISOString(),
-        }).where(and(eq(fatture.id, id), eq(fatture.profileId, profileId)));
-      });
-      break;
-    } catch (err) {
-      if (isUniqueViolation(err) && attempt === 0) continue;
-      throw err;
-    }
+
+  // Numerazione gap-free in un SINGOLO statement atomico: il progressivo è
+  // calcolato inline come MAX(progressivo)+1 per (profilo, anno) e l'UPDATE
+  // matcha solo se la fattura è ancora 'bozza'. Niente transazione né retry:
+  // SQLite/libSQL serializza le scritture e ogni subquery vede lo stato
+  // committato, quindi due /invia concorrenti (stessa o diverse fatture) non
+  // possono collidere né lasciare buchi. Il perdente vede 0 righe → 409.
+  const nextProg = sql`(select coalesce(max(${fatture.progressivo}), 0) + 1 from ${fatture} where ${fatture.profileId} = ${profileId} and ${fatture.annoProgressivo} = ${anno})`;
+
+  const updated = await db.update(fatture).set({
+    progressivo: nextProg,
+    numeroDisplay: sql`${String(anno)} || '/' || ${nextProg}`,
+    stato: 'inviata',
+    dataInvioSdi: iso,
+    marcaDaBollo: bolloFlag,
+    updatedAt: new Date().toISOString(),
+  }).where(and(
+    eq(fatture.id, id), eq(fatture.profileId, profileId), eq(fatture.stato, 'bozza'),
+  )).returning({ id: fatture.id });
+
+  if (updated.length === 0) {
+    // Richiesta concorrente (o doppio click) ha già inviato la fattura.
+    throw new HttpError(409, 'FATTURA_NOT_INVIABILE', 'Fattura già inviata o non più in bozza');
   }
 
   const [row] = await db.select().from(fatture).where(eq(fatture.id, id)).limit(1);

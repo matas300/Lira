@@ -176,3 +176,39 @@ test('transizioni illegali → 409', async () => {
   const r2 = await app.request(`/api/fatture/${a.id}/invia`, { method: 'POST', headers });
   assert.equal(r2.status, 409);
 });
+
+test('invia concorrente sulla stessa bozza → un solo 200, niente buco di numerazione', async () => {
+  const { app, headers, clienteId } = await makeApp();
+  const a = await createBozza(app, headers, clienteId);
+  // Due richieste /invia in parallelo sulla STESSA bozza: il guard sullo stato
+  // deve essere atomico (dentro la transazione), altrimenti entrambe passano il
+  // check esterno e la seconda riscrive il progressivo → buco (1 saltato).
+  const [r1, r2] = await Promise.all([
+    app.request(`/api/fatture/${a.id}/invia`, { method: 'POST', headers }),
+    app.request(`/api/fatture/${a.id}/invia`, { method: 'POST', headers }),
+  ]);
+  const statuses = [r1.status, r2.status].sort();
+  assert.deepEqual(statuses, [200, 409]); // esattamente una invia, l'altra bloccata
+  const got = await (await app.request(`/api/fatture/${a.id}`, { headers })).json() as any;
+  assert.equal(got.stato, 'inviata');
+  assert.equal(got.progressivo, 1); // numerazione gap-free preservata
+});
+
+test('round-trip: aliquota/tipo/causale ritenuta rileggibili in GET', async () => {
+  const { app, headers, clienteId } = await makeApp();
+  const created = await (await app.request('/api/fatture', {
+    method: 'POST', headers: J(headers),
+    body: JSON.stringify({
+      clienteId, data: '2026-03-01',
+      righe: [{ descrizione: 'x', prezzoUnitario: 100 }],
+      ritenuta: 20, aliquotaRitenuta: 20, tipoRitenuta: 'RT01', causaleRitenuta: 'A',
+    }),
+  })).json() as any;
+  assert.equal(created.aliquotaRitenuta, 20);
+  assert.equal(created.tipoRitenuta, 'RT01');
+  assert.equal(created.causaleRitenuta, 'A');
+  const got = await (await app.request(`/api/fatture/${created.id}`, { headers })).json() as any;
+  assert.equal(got.aliquotaRitenuta, 20);
+  assert.equal(got.tipoRitenuta, 'RT01');
+  assert.equal(got.causaleRitenuta, 'A');
+});
