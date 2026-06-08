@@ -13,8 +13,11 @@ import { and, desc, eq } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { FatturaCreateInput, FatturaUpdateInput } from '@shared/schemas';
-import { computeImporto } from '@shared/fattura-logic';
-import { fatture, clienti } from '../db/schema';
+import {
+  computeImporto, isBolloDovuto,
+  validateRitenutaForfettario, validateClienteSnapshot,
+} from '@shared/fattura-logic';
+import { fatture, clienti, yearSettings } from '../db/schema';
 import type { Db } from '../db/client';
 import { HttpError } from '../middleware/error';
 import { zJson } from '../middleware/validate';
@@ -201,4 +204,127 @@ fattureRoute.delete('/:id', async (c) => {
   }
   await db.delete(fatture).where(and(eq(fatture.id, id), eq(fatture.profileId, profileId)));
   return c.json({ ok: true });
+});
+
+// ════════════ Transizioni (state machine) ════════════
+
+/**
+ * Rileva una violazione UNIQUE (per il retry sulla numerazione concorrente).
+ * Preferisce il codice strutturato del driver libSQL; fallback sul messaggio
+ * SOLO sul testo UNIQUE (no generico SQLITE_CONSTRAINT → niente NOTNULL/FK).
+ * Coerente con routes/clienti.ts.
+ */
+function isUniqueViolation(err: unknown): boolean {
+  const code = (err as { code?: unknown } | null)?.code;
+  if (typeof code === 'string') return code === 'SQLITE_CONSTRAINT_UNIQUE';
+  const msg = err instanceof Error ? err.message : String(err);
+  return /UNIQUE constraint failed/i.test(msg);
+}
+
+/** Regime dell'anno per il profilo; default forfettario se non configurato. */
+async function regimeFor(db: Db, profileId: string, year: number): Promise<string> {
+  const [ys] = await db.select().from(yearSettings)
+    .where(and(eq(yearSettings.profileId, profileId), eq(yearSettings.year, year))).limit(1);
+  return ys?.regime ?? 'forfettario';
+}
+
+// ─────────── POST /:id/invia ───────────
+// Assegna il progressivo gap-free dentro una transazione (retry una volta su
+// violazione UNIQUE), dopo le validazioni fail-fast (ritenuta/cliente).
+fattureRoute.post('/:id/invia', async (c) => {
+  const db = c.get('db');
+  const profileId = c.get('activeProfileId');
+  const id = c.req.param('id');
+
+  const [f] = await db.select().from(fatture)
+    .where(and(eq(fatture.id, id), eq(fatture.profileId, profileId))).limit(1);
+  if (!f) throw new HttpError(404, 'FATTURA_NOT_FOUND', `Fattura ${id} non trovata`);
+  if (f.stato !== 'bozza') throw new HttpError(409, 'FATTURA_NOT_INVIABILE', `Stato "${f.stato}" non inviabile`);
+
+  const anno = annoFromData(f.data);
+  const regime = await regimeFor(db, profileId, anno);
+
+  // Validazioni fail-fast
+  const ritErr = validateRitenutaForfettario(regime, f.ritenuta);
+  if (ritErr) throw new HttpError(422, 'RITENUTA_FORFETTARIO', ritErr);
+  const snapshot = parseJson<Record<string, unknown> | null>(f.clienteSnapshot, null);
+  const cliErr = validateClienteSnapshot(snapshot as never);
+  if (cliErr) throw new HttpError(422, 'CLIENTE_INCOMPLETO', cliErr);
+
+  // Bollo dovuto (forfettario, imponibile > 77,47 €) → marca da bollo sulla fattura.
+  const bolloFlag = isBolloDovuto(regime, f.importo) ? 1 : f.marcaDaBollo;
+
+  const iso = todayIso();
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await db.transaction(async (tx) => {
+        const rows = await tx.select({ p: fatture.progressivo }).from(fatture)
+          .where(and(eq(fatture.profileId, profileId), eq(fatture.annoProgressivo, anno)));
+        let max = 0;
+        for (const r of rows) if (r.p != null && r.p > max) max = r.p;
+        const next = max + 1;
+        await tx.update(fatture).set({
+          progressivo: next,
+          numeroDisplay: `${anno}/${next}`,
+          stato: 'inviata',
+          dataInvioSdi: iso,
+          marcaDaBollo: bolloFlag,
+          updatedAt: new Date().toISOString(),
+        }).where(and(eq(fatture.id, id), eq(fatture.profileId, profileId)));
+      });
+      break;
+    } catch (err) {
+      if (isUniqueViolation(err) && attempt === 0) continue;
+      throw err;
+    }
+  }
+
+  const [row] = await db.select().from(fatture).where(eq(fatture.id, id)).limit(1);
+  return c.json(toPublic(row!));
+});
+
+// ─────────── POST /:id/paga ───────────
+const PagaInput = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() });
+
+fattureRoute.post('/:id/paga', zJson(PagaInput), async (c) => {
+  const db = c.get('db');
+  const profileId = c.get('activeProfileId');
+  const id = c.req.param('id');
+  const { date } = c.req.valid('json') as z.infer<typeof PagaInput>;
+
+  const [f] = await db.select().from(fatture)
+    .where(and(eq(fatture.id, id), eq(fatture.profileId, profileId))).limit(1);
+  if (!f) throw new HttpError(404, 'FATTURA_NOT_FOUND', `Fattura ${id} non trovata`);
+  if (f.stato !== 'inviata') throw new HttpError(409, 'FATTURA_NOT_PAGABILE', `Stato "${f.stato}" non pagabile`);
+
+  const iso = date ?? todayIso();
+  const yy = Number(iso.slice(0, 4));
+  const mm = Number(iso.slice(5, 7));
+  await db.update(fatture).set({
+    stato: 'pagata', dataPagamento: iso, pagMese: mm, pagAnno: yy,
+    updatedAt: new Date().toISOString(),
+  }).where(and(eq(fatture.id, id), eq(fatture.profileId, profileId)));
+
+  const [row] = await db.select().from(fatture).where(eq(fatture.id, id)).limit(1);
+  return c.json(toPublic(row!));
+});
+
+// ─────────── POST /:id/annulla-pagamento ───────────
+fattureRoute.post('/:id/annulla-pagamento', async (c) => {
+  const db = c.get('db');
+  const profileId = c.get('activeProfileId');
+  const id = c.req.param('id');
+
+  const [f] = await db.select().from(fatture)
+    .where(and(eq(fatture.id, id), eq(fatture.profileId, profileId))).limit(1);
+  if (!f) throw new HttpError(404, 'FATTURA_NOT_FOUND', `Fattura ${id} non trovata`);
+  if (f.stato !== 'pagata') throw new HttpError(409, 'FATTURA_NOT_PAGATA', `Stato "${f.stato}" non annullabile`);
+
+  await db.update(fatture).set({
+    stato: 'inviata', dataPagamento: null, pagMese: null, pagAnno: null,
+    updatedAt: new Date().toISOString(),
+  }).where(and(eq(fatture.id, id), eq(fatture.profileId, profileId)));
+
+  const [row] = await db.select().from(fatture).where(eq(fatture.id, id)).limit(1);
+  return c.json(toPublic(row!));
 });

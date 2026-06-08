@@ -102,3 +102,77 @@ test('scoping: id di altro profilo → 404', async () => {
   });
   assert.equal(r.status, 404);
 });
+
+// ───── Transizioni (Task 5) ─────
+
+async function createBozza(app: any, headers: any, clienteId: string, data = '2026-03-01', righe = [{ descrizione: 'x', prezzoUnitario: 1000 }]) {
+  return await (await app.request('/api/fatture', {
+    method: 'POST', headers: J(headers), body: JSON.stringify({ clienteId, data, righe }),
+  })).json() as any;
+}
+
+test('invia: assegna numero gap-free, due fatture → 2026/1 e 2026/2', async () => {
+  const { app, headers, clienteId } = await makeApp();
+  const a = await createBozza(app, headers, clienteId);
+  const b = await createBozza(app, headers, clienteId);
+  const ra = await app.request(`/api/fatture/${a.id}/invia`, { method: 'POST', headers });
+  const rb = await app.request(`/api/fatture/${b.id}/invia`, { method: 'POST', headers });
+  assert.equal(ra.status, 200);
+  const ja = (await ra.json()) as any;
+  assert.equal(ja.numeroDisplay, '2026/1');
+  assert.equal(ja.marcaDaBollo, true); // imponibile 1000 > 77,47 in forfettario
+  assert.equal(((await rb.json()) as any).numeroDisplay, '2026/2');
+});
+
+test('invia: gap-free dopo delete di una bozza intermedia', async () => {
+  const { app, headers, clienteId } = await makeApp();
+  const a = await createBozza(app, headers, clienteId);
+  const b = await createBozza(app, headers, clienteId);
+  await app.request(`/api/fatture/${a.id}/invia`, { method: 'POST', headers }); // 2026/1
+  await app.request(`/api/fatture/${b.id}`, { method: 'DELETE', headers });      // elimino bozza b
+  const c2 = await createBozza(app, headers, clienteId);
+  const rc = await app.request(`/api/fatture/${c2.id}/invia`, { method: 'POST', headers });
+  assert.equal(((await rc.json()) as any).numeroDisplay, '2026/2'); // niente buchi
+});
+
+test('invia: ritenuta in forfettario → 422 RITENUTA_FORFETTARIO', async () => {
+  const { app, headers, clienteId } = await makeApp();
+  const a = await (await app.request('/api/fatture', {
+    method: 'POST', headers: J(headers),
+    body: JSON.stringify({ clienteId, data: '2026-03-01', ritenuta: 50, righe: [{ descrizione: 'x', prezzoUnitario: 1000 }] }),
+  })).json() as any;
+  const r = await app.request(`/api/fatture/${a.id}/invia`, { method: 'POST', headers });
+  assert.equal(r.status, 422);
+  assert.equal(((await r.json()) as any).error.code, 'RITENUTA_FORFETTARIO');
+});
+
+test('paga: inviata → pagata con pagMese/pagAnno derivati; annulla torna inviata', async () => {
+  const { app, headers, clienteId } = await makeApp();
+  const a = await createBozza(app, headers, clienteId);
+  await app.request(`/api/fatture/${a.id}/invia`, { method: 'POST', headers });
+  const rp = await app.request(`/api/fatture/${a.id}/paga`, {
+    method: 'POST', headers: J(headers), body: JSON.stringify({ date: '2026-05-08' }),
+  });
+  assert.equal(rp.status, 200);
+  const paid = (await rp.json()) as any;
+  assert.equal(paid.stato, 'pagata');
+  assert.equal(paid.pagMese, 5);
+  assert.equal(paid.pagAnno, 2026);
+
+  const ru = await app.request(`/api/fatture/${a.id}/annulla-pagamento`, { method: 'POST', headers });
+  const back = (await ru.json()) as any;
+  assert.equal(back.stato, 'inviata');
+  assert.equal(back.pagMese, null);
+});
+
+test('transizioni illegali → 409', async () => {
+  const { app, headers, clienteId } = await makeApp();
+  const a = await createBozza(app, headers, clienteId);
+  // paga su bozza → 409
+  const r1 = await app.request(`/api/fatture/${a.id}/paga`, { method: 'POST', headers: J(headers), body: '{}' });
+  assert.equal(r1.status, 409);
+  // invia due volte → seconda 409
+  await app.request(`/api/fatture/${a.id}/invia`, { method: 'POST', headers });
+  const r2 = await app.request(`/api/fatture/${a.id}/invia`, { method: 'POST', headers });
+  assert.equal(r2.status, 409);
+});
