@@ -8,6 +8,7 @@ import { profilesRoute } from './routes/profiles';
 import { yearSettingsRoute } from './routes/year-settings';
 import { pagamentiRoute } from './routes/pagamenti';
 import { clientiRoute } from './routes/clienti';
+import { fattureRoute } from './routes/fatture';
 import { scadenziarioRoute } from './routes/scadenziario';
 import { taxRoute } from './routes/tax';
 import { errorHandler } from './middleware/error';
@@ -28,6 +29,7 @@ app.route('/api/profiles', profilesRoute);
 app.route('/api/year-settings', yearSettingsRoute);
 app.route('/api/pagamenti', pagamentiRoute);
 app.route('/api/clienti', clientiRoute);
+app.route('/api/fatture', fattureRoute);
 app.route('/api/scadenziario', scadenziarioRoute);
 app.route('/api/tax', taxRoute);
 
