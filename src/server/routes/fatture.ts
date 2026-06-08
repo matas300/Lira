@@ -17,11 +17,13 @@ import {
   computeImporto, isBolloDovuto,
   validateRitenutaForfettario, validateClienteSnapshot,
 } from '@shared/fattura-logic';
-import { fatture, clienti, yearSettings } from '../db/schema';
+import { fatture, clienti, yearSettings, profiles } from '../db/schema';
 import type { Db } from '../db/client';
 import { HttpError } from '../middleware/error';
 import { zJson } from '../middleware/validate';
 import { requireSession, type AuthEnv } from '../middleware/auth';
+import { readCedenteFromProfile } from '@shared/cedente';
+import { buildFatturaXml, validateFatturaForXml, type FatturaXmlInput } from '@shared/fattura-xml';
 
 export const fattureRoute = new Hono<AuthEnv>();
 fattureRoute.use('*', requireSession);
@@ -318,4 +320,66 @@ fattureRoute.post('/:id/annulla-pagamento', async (c) => {
 
   const [row] = await db.select().from(fatture).where(eq(fatture.id, id)).limit(1);
   return c.json(toPublic(row!));
+});
+
+// ─────────── GET /:id/xml ───────────
+
+/** Nome file SDI: IT<piva>_<progressivo 5 alfanum>. */
+function xmlFilename(piva: string, numeroDisplay: string): string {
+  const prog = String(numeroDisplay).replace(/[^A-Za-z0-9]/g, '').slice(-5).padStart(5, '0');
+  return `IT${String(piva).replace(/\D/g, '')}_${prog}`;
+}
+
+fattureRoute.get('/:id/xml', async (c) => {
+  const db = c.get('db');
+  const profileId = c.get('activeProfileId');
+  const id = c.req.param('id');
+
+  const [f] = await db.select().from(fatture)
+    .where(and(eq(fatture.id, id), eq(fatture.profileId, profileId))).limit(1);
+  if (!f) throw new HttpError(404, 'FATTURA_NOT_FOUND', `Fattura ${id} non trovata`);
+  if (f.stato === 'bozza' || !f.numeroDisplay) {
+    throw new HttpError(422, 'FATTURA_NON_NUMERATA', 'La fattura deve essere inviata (numerata) prima di generare l\'XML');
+  }
+
+  const [profile] = await db.select().from(profiles).where(eq(profiles.id, profileId)).limit(1);
+  if (!profile) throw new HttpError(404, 'PROFILE_NOT_FOUND', 'Profilo non trovato');
+  const anno = annoFromData(f.data);
+  const regime = await regimeFor(db, profileId, anno);
+  const cedRes = readCedenteFromProfile({
+    anagrafica: parseJson<Record<string, unknown> | null>(profile.anagrafica, null),
+    attivita: parseJson<Record<string, unknown> | null>(profile.attivita, null),
+    regime,
+  });
+  if ('errors' in cedRes) {
+    throw new HttpError(422, 'CEDENTE_INCOMPLETO', 'Dati del cedente incompleti per l\'XML', cedRes.errors);
+  }
+
+  const pub = toPublic(f);
+  const input: FatturaXmlInput = {
+    cedente: cedRes.cedente,
+    cliente: (pub.clienteSnapshot ?? {}) as FatturaXmlInput['cliente'],
+    numero: pub.numeroDisplay!,
+    data: pub.data,
+    righe: pub.righe,
+    importo: pub.importo,
+    ritenuta: pub.ritenuta,
+    aliquotaRitenuta: pub.aliquotaRitenuta ?? null,
+    tipoRitenuta: pub.tipoRitenuta ?? null,
+    causaleRitenuta: pub.causaleRitenuta ?? null,
+    marcaDaBollo: pub.marcaDaBollo,
+    bolloAddebitato: pub.bolloAddebitato,
+    modalitaPagamento: pub.modalitaPagamento,
+    contributoIntegrativo: pub.contributoIntegrativo,
+  };
+
+  const errors = validateFatturaForXml(input);
+  if (errors.length) {
+    throw new HttpError(422, 'FATTURA_XML_INVALIDA', 'La fattura non è esportabile in XML', errors);
+  }
+
+  const xml = buildFatturaXml(input);
+  c.header('Content-Type', 'application/xml; charset=utf-8');
+  c.header('Content-Disposition', `attachment; filename="${xmlFilename(cedRes.cedente.partitaIva, pub.numeroDisplay!)}.xml"`);
+  return c.body(xml);
 });

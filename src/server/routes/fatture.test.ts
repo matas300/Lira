@@ -212,3 +212,87 @@ test('round-trip: aliquota/tipo/causale ritenuta rileggibili in GET', async () =
   assert.equal(got.tipoRitenuta, 'RT01');
   assert.equal(got.causaleRitenuta, 'A');
 });
+
+// ───── XML FatturaPA (Task 5B) ─────
+import { profiles } from '../db/schema';
+import { eq as eqDrizzle } from 'drizzle-orm';
+
+async function setCedente(db: any, profileId: string) {
+  await db.update(profiles).set({
+    anagrafica: JSON.stringify({
+      cf: 'RSSMRA80A01H501U', nome: 'Mario', cognome: 'Rossi',
+      residenza: { indirizzo: 'Via Roma 1', cap: '20100', citta: 'Milano', provincia: 'MI' },
+    }),
+    attivita: JSON.stringify({ partita_iva: '00743110157' }),
+  }).where(eqDrizzle(profiles.id, profileId));
+}
+
+async function clienteCompleto(db: any, profileId: string): Promise<string> {
+  // Riusa il cliente creato da makeApp (stessa P.IVA -> niente collisione UNIQUE)
+  // e gli aggiunge la sede richiesta dall'XML.
+  const [existing] = await db.select().from(clienti).where(eqDrizzle(clienti.profileId, profileId)).limit(1);
+  await db.update(clienti).set({
+    indirizzo: 'Via Po 2', cap: '10100', citta: 'Torino', provincia: 'TO',
+  }).where(eqDrizzle(clienti.id, existing.id));
+  return existing.id as string;
+}
+
+test('GET /:id/xml — fattura inviata -> 200 application/xml + filename', async () => {
+  const { app, db, headers, profileId } = await makeApp();
+  await setCedente(db, profileId);
+  const cId = await clienteCompleto(db, profileId);
+  const f = await (await app.request('/api/fatture', {
+    method: 'POST', headers: J(headers),
+    body: JSON.stringify({ clienteId: cId, data: '2026-03-01', righe: [{ descrizione: 'x', prezzoUnitario: 1000 }] }),
+  })).json() as any;
+  await app.request(`/api/fatture/${f.id}/invia`, { method: 'POST', headers });
+
+  const r = await app.request(`/api/fatture/${f.id}/xml`, { headers });
+  assert.equal(r.status, 200);
+  assert.match(r.headers.get('content-type') || '', /application\/xml/);
+  assert.match(r.headers.get('content-disposition') || '', /attachment; filename="IT00743110157_/);
+  const xml = await r.text();
+  assert.match(xml, /<TipoDocumento>TD01<\/TipoDocumento>/);
+  assert.match(xml, /<Numero>2026\/1<\/Numero>/);
+});
+
+test('GET /:id/xml — bozza -> 422 FATTURA_NON_NUMERATA', async () => {
+  const { app, db, headers, profileId } = await makeApp();
+  await setCedente(db, profileId);
+  const cId = await clienteCompleto(db, profileId);
+  const f = await (await app.request('/api/fatture', {
+    method: 'POST', headers: J(headers),
+    body: JSON.stringify({ clienteId: cId, data: '2026-03-01', righe: [{ descrizione: 'x', prezzoUnitario: 1000 }] }),
+  })).json() as any;
+  const r = await app.request(`/api/fatture/${f.id}/xml`, { headers });
+  assert.equal(r.status, 422);
+  assert.equal(((await r.json()) as any).error.code, 'FATTURA_NON_NUMERATA');
+});
+
+test('GET /:id/xml — cedente incompleto -> 422 CEDENTE_INCOMPLETO con details', async () => {
+  const { app, db, headers, profileId } = await makeApp();
+  const cId = await clienteCompleto(db, profileId);
+  const f = await (await app.request('/api/fatture', {
+    method: 'POST', headers: J(headers),
+    body: JSON.stringify({ clienteId: cId, data: '2026-03-01', righe: [{ descrizione: 'x', prezzoUnitario: 1000 }] }),
+  })).json() as any;
+  await app.request(`/api/fatture/${f.id}/invia`, { method: 'POST', headers });
+  const r = await app.request(`/api/fatture/${f.id}/xml`, { headers });
+  assert.equal(r.status, 422);
+  const body = (await r.json()) as any;
+  assert.equal(body.error.code, 'CEDENTE_INCOMPLETO');
+  assert.ok(Array.isArray(body.error.details) && body.error.details.length > 0);
+});
+
+test('GET /:id/xml — id altro profilo -> 404', async () => {
+  const { app: appA, db: dbA, headers: hA, profileId: pA } = await makeApp('a@x.it');
+  const { app: appB, headers: hB } = await makeApp('b@x.it');
+  await setCedente(dbA, pA);
+  const cId = await clienteCompleto(dbA, pA);
+  const f = await (await appA.request('/api/fatture', {
+    method: 'POST', headers: J(hA),
+    body: JSON.stringify({ clienteId: cId, data: '2026-03-01', righe: [{ descrizione: 'x', prezzoUnitario: 1 }] }),
+  })).json() as any;
+  const r = await appB.request(`/api/fatture/${f.id}/xml`, { headers: hB });
+  assert.equal(r.status, 404);
+});
