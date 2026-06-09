@@ -379,3 +379,17 @@ test('invia NC parziale → originale resta inviata', async () => {
   const origAfter = await (await app.request(`/api/fatture/${orig.id}`, { headers })).json() as any;
   assert.equal(origAfter.stato, 'inviata');
 });
+
+test('GET /:id/xml — NC TD04 → XML TD04, importi negativi, DatiFattureCollegate', async () => {
+  const { app, db, headers, profileId } = await makeApp();
+  await setCedente(db, profileId);
+  const cId = await clienteCompleto(db, profileId);
+  const orig = await inviaOriginale(app, headers, cId);
+  const nc = await creaEInviaNC(app, headers, orig.id, 1000);
+  const r = await app.request(`/api/fatture/${nc.id}/xml`, { headers });
+  assert.equal(r.status, 200);
+  const xml = await r.text();
+  assert.match(xml, /<TipoDocumento>TD04<\/TipoDocumento>/);
+  assert.match(xml, /<ImponibileImporto>-1000\.00<\/ImponibileImporto>/);
+  assert.match(xml, /<IdDocumento>2026\/1<\/IdDocumento>/);
+});

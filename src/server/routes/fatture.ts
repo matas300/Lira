@@ -430,6 +430,19 @@ fattureRoute.get('/:id/xml', async (c) => {
     throw new HttpError(422, 'CEDENTE_INCOMPLETO', 'Dati del cedente incompleti per l\'XML', cedRes.errors);
   }
 
+  let fatturaOriginale: { numero: string; data: string } | undefined;
+  if (f.tipoDocumento === 'TD04') {
+    if (!f.fatturaOriginaleId) {
+      throw new HttpError(422, 'NC_ORIGINALE_MANCANTE', 'Nota di credito senza fattura originale collegata');
+    }
+    const [orig] = await db.select().from(fatture)
+      .where(and(eq(fatture.id, f.fatturaOriginaleId), eq(fatture.profileId, profileId))).limit(1);
+    if (!orig || !orig.numeroDisplay) {
+      throw new HttpError(422, 'NC_ORIGINALE_MANCANTE', 'Fattura originale della NC non trovata o non numerata');
+    }
+    fatturaOriginale = { numero: orig.numeroDisplay, data: orig.data };
+  }
+
   const pub = toPublic(f);
   const input: FatturaXmlInput = {
     cedente: cedRes.cedente,
@@ -446,6 +459,8 @@ fattureRoute.get('/:id/xml', async (c) => {
     bolloAddebitato: pub.bolloAddebitato,
     modalitaPagamento: pub.modalitaPagamento,
     contributoIntegrativo: pub.contributoIntegrativo,
+    tipoDocumento: pub.tipoDocumento as 'TD01' | 'TD04',
+    fatturaOriginale,
   };
 
   const errors = validateFatturaForXml(input);
