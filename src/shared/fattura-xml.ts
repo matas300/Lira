@@ -120,6 +120,8 @@ export interface FatturaXmlInput {
   bolloAddebitato: boolean;
   modalitaPagamento: string | null;
   contributoIntegrativo: number;
+  tipoDocumento?: 'TD01' | 'TD04';
+  fatturaOriginale?: { numero: string; data: string };
 }
 
 /** Helper stringa locale (trim, null-safe). Usato da validate + builder. */
@@ -161,13 +163,13 @@ export function validateFatturaForXml(input: FatturaXmlInput): string[] {
 
 // ───── Builder XML TD01 ─────
 
-function buildDettaglioLinee(input: FatturaXmlInput): { linee: string[]; rimborsoBollo: boolean } {
+function buildDettaglioLinee(input: FatturaXmlInput, sign: number): { linee: string[]; rimborsoBollo: boolean } {
   let n = 0;
   const linee = input.righe.map((line) => {
     n++;
     const qta = parseMaybeNumber(line.quantita) || 1;
     const pu = round2(parseMaybeNumber(line.prezzoUnitario));
-    const tot = round2(qta * pu);
+    const tot = round2(qta * pu * sign);
     const desc = sanitizeXmlLatin1(line.descrizione || 'Prestazione professionale').slice(0, 1000);
     return '    <DettaglioLinee>\n'
       + '      <NumeroLinea>' + n + '</NumeroLinea>\n'
@@ -179,7 +181,8 @@ function buildDettaglioLinee(input: FatturaXmlInput): { linee: string[]; rimbors
       + '      <Natura>N2.2</Natura>\n'
       + '    </DettaglioLinee>';
   });
-  const rimborsoBollo = input.marcaDaBollo && input.bolloAddebitato && round2(input.importo) > SOGLIA_BOLLO;
+  // Rimborso bollo solo su TD01 (sign=1) con bollo addebitato sopra soglia.
+  const rimborsoBollo = sign === 1 && input.marcaDaBollo && input.bolloAddebitato && round2(input.importo) > SOGLIA_BOLLO;
   if (rimborsoBollo) {
     n++;
     linee.push('    <DettaglioLinee>\n'
@@ -217,10 +220,25 @@ function buildCessionarioFiscale(c: ClienteSnapshotXml): string {
   return '\n        <CodiceFiscale>' + xmlEscape(cf) + '</CodiceFiscale>';
 }
 
-/** Genera l'XML FatturaPA v1.2 TD01. Assume input gia' validato (validateFatturaForXml). */
+/** DatiFattureCollegate (dentro DatiGenerali, dopo DatiGeneraliDocumento). Solo NC TD04. */
+function buildDatiFattureCollegate(orig: { numero: string; data: string } | undefined): string {
+  if (!orig) return '';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(orig.data))) {
+    throw new Error('NC: data fattura originale "' + orig.data + '" non in formato ISO YYYY-MM-DD (XSD xs:date).');
+  }
+  return '\n    <DatiFattureCollegate>\n'
+    + '      <RiferimentoNumeroLinea>1</RiferimentoNumeroLinea>\n'
+    + '      <IdDocumento>' + xmlEscape(orig.numero) + '</IdDocumento>\n'
+    + '      <Data>' + xmlEscape(orig.data) + '</Data>\n'
+    + '    </DatiFattureCollegate>';
+}
+
+/** Genera l'XML FatturaPA v1.2 TD01/TD04. Assume input gia' validato (validateFatturaForXml). */
 export function buildFatturaXml(input: FatturaXmlInput): string {
   const ced = input.cedente;
   const c = input.cliente;
+  const tipoDoc = input.tipoDocumento || 'TD01';
+  const sign = tipoDoc === 'TD04' ? -1 : 1;
   const regimeFiscale = regimeToRF(ced.regime);
   const progressivo = sanitizeProgressivoInvio(input.numero);
   const piva = s(ced.partitaIva).replace(/\s+/g, '');
@@ -247,22 +265,23 @@ export function buildFatturaXml(input: FatturaXmlInput): string {
   const naturaLinea = 'N2.2';
   const riferimentoNormativo = "Regime forfettario: operazione in franchigia IVA e senza ritenuta d'acconto Art.1 c.54-89 L.190/2014";
 
-  const { linee, rimborsoBollo } = buildDettaglioLinee(input);
+  const { linee, rimborsoBollo } = buildDettaglioLinee(input, sign);
 
-  const datiBollo = (input.marcaDaBollo && imponibile > SOGLIA_BOLLO)
+  const datiBollo = (sign === 1 && input.marcaDaBollo && imponibile > SOGLIA_BOLLO)
     ? '\n      <DatiBollo>\n        <BolloVirtuale>SI</BolloVirtuale>\n        <ImportoBollo>2.00</ImportoBollo>\n      </DatiBollo>'
     : '';
 
   // DatiGeneraliDocumento — ordine XSD: TipoDocumento, Divisa, Data, Numero, DatiBollo, ImportoTotaleDocumento
-  const importoTotale = round2(input.importo + (rimborsoBollo ? 2 : 0));
+  const importoTotale = round2((input.importo + (rimborsoBollo ? 2 : 0)) * sign);
   const dggParts: string[] = [];
-  dggParts.push('<TipoDocumento>TD01</TipoDocumento>');
+  dggParts.push('<TipoDocumento>' + tipoDoc + '</TipoDocumento>');
   dggParts.push('<Divisa>EUR</Divisa>');
   dggParts.push('<Data>' + xmlEscape(input.data) + '</Data>');
   dggParts.push('<Numero>' + xmlEscape(input.numero) + '</Numero>');
   if (datiBollo.trim()) dggParts.push(datiBollo.trim());
   dggParts.push('<ImportoTotaleDocumento>' + fmtXmlNum(importoTotale) + '</ImportoTotaleDocumento>');
   const datiGeneraliDocumentoXml = '<DatiGeneraliDocumento>' + dggParts.join('') + '</DatiGeneraliDocumento>';
+  const datiFattureCollegate = buildDatiFattureCollegate(input.fatturaOriginale);
 
   const cessionarioFiscaleXml = buildCessionarioFiscale(c);
 
@@ -286,7 +305,7 @@ export function buildFatturaXml(input: FatturaXmlInput): string {
       <CondizioniPagamento>TP02</CondizioniPagamento>
       <DettaglioPagamento>
         <ModalitaPagamento>${modalitaToCodiceMP(input.modalitaPagamento)}</ModalitaPagamento>
-        <ImportoPagamento>${fmtXmlNum(round2(importoTotale - (Number(input.ritenuta) || 0)))}</ImportoPagamento>
+        <ImportoPagamento>${fmtXmlNum(round2(importoTotale - (Number(input.ritenuta) || 0) * sign))}</ImportoPagamento>
       </DettaglioPagamento>
     </DatiPagamento>`;
 
@@ -340,14 +359,14 @@ export function buildFatturaXml(input: FatturaXmlInput): string {
   </FatturaElettronicaHeader>
   <FatturaElettronicaBody>
     <DatiGenerali>
-      ${datiGeneraliDocumentoXml}
+      ${datiGeneraliDocumentoXml}${datiFattureCollegate}
     </DatiGenerali>
     <DatiBeniServizi>
 ${linee.join('\n')}
       <DatiRiepilogo>
         <AliquotaIVA>0.00</AliquotaIVA>
         <Natura>${naturaLinea}</Natura>
-        <ImponibileImporto>${fmtXmlNum(imponibile)}</ImponibileImporto>
+        <ImponibileImporto>${fmtXmlNum(round2(imponibile * sign))}</ImponibileImporto>
         <Imposta>0.00</Imposta>
         <RiferimentoNormativo>${xmlEscape(riferimentoNormativo)}</RiferimentoNormativo>
       </DatiRiepilogo>${rimborsoBollo ? `
