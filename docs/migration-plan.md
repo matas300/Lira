@@ -44,7 +44,7 @@
 - [x] Note di Credito TD04 + storno parziale/totale → stornata + XML TD04 (DatiFattureCollegate) (Slice 5C, 2026-06-09)
 - [ ] PDF (jspdf) — porta layout minimalista
 - [x] Validators server-side XML (regime/ritenuta, cliente IT, IPA PA, estero) al boundary di generazione (Slice 5B, 2026-06-08)
-- [ ] Import XML (nuove + legacy)
+- [x] Import file XML FatturaPA (TD01/TD04) da /fatture: parse client + match/dedup server, insert inviata origine=import (Slice 5E, 2026-06-09)
 
 ### Fase 6 — Scadenziario + Pagamenti
 - [ ] Tax engine (port da CalcoliVari `tax-engine.js` → `src/server/lib/tax-engine.ts`)
