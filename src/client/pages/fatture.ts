@@ -7,9 +7,11 @@ import { openModal } from '../components/modal';
 import { listClienti } from '../lib/clienti-api';
 import {
   listFatture, createFattura, updateFattura, removeFattura,
-  inviaFattura, pagaFattura, downloadFatturaXml, createNotaCredito,
+  inviaFattura, pagaFattura, downloadFatturaXml, createNotaCredito, importXmlFatture,
 } from '../lib/fatture-api';
-import type { FatturaPublic, ClientePublic, Riga } from '@shared/types';
+import { parseFatturaXml, ImportParseError } from '../lib/parse-fattura-xml';
+import { buildImportItem } from '@shared/import-fattura';
+import type { FatturaPublic, ClientePublic, Riga, ImportFatturaInput } from '@shared/types';
 
 function esc(v: unknown): string {
   return String(v ?? '').replace(/[&<>"']/g, (ch) => (
@@ -300,7 +302,11 @@ export function mount(container: HTMLElement): () => void {
           <div class="card">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-4);">
               <h2 style="margin:0;">Fatture</h2>
-              <button class="btn btn-primary" data-new${clienti.length ? '' : ' disabled title="Crea prima un cliente"'}>Nuova</button>
+              <div style="display:flex;gap:var(--space-2);">
+                <button class="btn btn-ghost" data-import-xml>Importa XML</button>
+                <button class="btn btn-primary" data-new${clienti.length ? '' : ' disabled title="Crea prima un cliente"'}>Nuova</button>
+              </div>
+              <input type="file" accept=".xml,text/xml,application/xml" multiple data-xml-input hidden />
             </div>
             <div style="display:flex;gap:var(--space-2);margin-bottom:var(--space-3);">${chips}</div>
             <div data-fatturato style="margin-bottom:var(--space-4);color:var(--text-muted);"></div>
@@ -316,6 +322,38 @@ export function mount(container: HTMLElement): () => void {
     container.querySelectorAll<HTMLButtonElement>('[data-filter]').forEach((b) => b.addEventListener('click', () => {
       filterKey = b.dataset.filter!; renderList();
     }));
+
+    const fileInput = container.querySelector<HTMLInputElement>('[data-xml-input]');
+    container.querySelector<HTMLButtonElement>('[data-import-xml]')?.addEventListener('click', () => fileInput?.click());
+    fileInput?.addEventListener('change', async () => {
+      const files = Array.from(fileInput.files ?? []);
+      fileInput.value = '';
+      if (!files.length) return;
+      const items: ImportFatturaInput[] = [];
+      const erroriParse: string[] = [];
+      for (const file of files) {
+        try {
+          items.push(buildImportItem(parseFatturaXml(await file.text())));
+        } catch (err) {
+          erroriParse.push(`${file.name}: ${err instanceof ImportParseError ? err.message : 'XML non valido'}`);
+        }
+      }
+      if (!items.length) {
+        alert('Nessun XML valido.\n' + erroriParse.join('\n'));
+        return;
+      }
+      try {
+        const rep = await importXmlFatture(items);
+        const righeSaltate = rep.saltate.map((s) => `• ${s.numero}: ${s.motivo}`).join('\n');
+        alert(`Importate: ${rep.importate}\nClienti creati: ${rep.clientiCreati}\nSaltate: ${rep.saltate.length}`
+          + (righeSaltate ? `\n${righeSaltate}` : '')
+          + (erroriParse.length ? `\nFile non parsati:\n${erroriParse.join('\n')}` : ''));
+        await refresh();
+      } catch (err) {
+        alert(err instanceof ApiError ? err.message : 'Errore import');
+      }
+    });
+
     await refresh();
   }
 
