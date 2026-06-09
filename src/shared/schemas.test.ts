@@ -91,3 +91,27 @@ test('NotaCreditoCreateInput — righe vuote → throw', () => {
 test('NotaCreditoCreateInput — data non ISO → throw', () => {
   assert.throws(() => NotaCreditoCreateInput.parse({ data: '01/04/2026', righe: [{ descrizione: 'x', prezzoUnitario: 1 }] }));
 });
+
+// ───── Import XML (Slice 5E) ─────
+import { ImportFatturaInput } from './schemas';
+
+test('ImportFatturaInput — minimo valido', () => {
+  const it = ImportFatturaInput.parse({
+    tipoDocumento: 'TD01', numero: '2026/1', data: '2026-03-01',
+    annoProgressivo: 2026, progressivo: 1, numeroDisplay: '2026/1',
+    righe: [{ descrizione: 'Consulenza', prezzoUnitario: 1000 }],
+    importo: 1000, marcaDaBollo: true,
+    clienteSnapshot: { nome: 'ACME Srl', tipoCliente: 'PG', partitaIva: '00743110157', nazione: 'IT' },
+  });
+  assert.equal(it.tipoDocumento, 'TD01');
+  assert.equal(it.righe[0]!.quantita, 1);
+  assert.equal(it.modalitaPagamento, null);
+});
+
+test('ImportFatturaInput — tipoDocumento invalido → throw', () => {
+  assert.throws(() => ImportFatturaInput.parse({
+    tipoDocumento: 'XX', numero: '1', data: '2026-03-01', annoProgressivo: 2026, progressivo: 1,
+    numeroDisplay: '2026/1', righe: [{ descrizione: 'x', prezzoUnitario: 1 }], importo: 1,
+    marcaDaBollo: false, clienteSnapshot: { nome: 'X', tipoCliente: 'PG', nazione: 'IT' },
+  }));
+});

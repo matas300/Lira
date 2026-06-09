@@ -46,3 +46,11 @@ export type FatturaPublic = z.infer<typeof FatturaPublicSchema>;
 
 import { NotaCreditoCreateInput as NotaCreditoCreateInputSchema } from './schemas';
 export type NotaCreditoCreateInput = z.infer<typeof NotaCreditoCreateInputSchema>;
+
+import { ImportFatturaInput as ImportFatturaInputSchema } from './schemas';
+export type ImportFatturaInput = z.infer<typeof ImportFatturaInputSchema>;
+export interface ImportReport {
+  importate: number;
+  clientiCreati: number;
+  saltate: Array<{ numero: string; motivo: string }>;
+}

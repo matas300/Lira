@@ -12,8 +12,9 @@ import { Hono } from 'hono';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { FatturaCreateInput, FatturaUpdateInput, NotaCreditoCreateInput } from '@shared/schemas';
+import { FatturaCreateInput, FatturaUpdateInput, NotaCreditoCreateInput, ImportXmlBody } from '@shared/schemas';
 import { isNCDateValid, computeStorno } from '@shared/nc-sync';
+import { matchCliente, dedupKey } from '@shared/import-fattura';
 import {
   computeImporto, isBolloDovuto,
   validateRitenutaForfettario, validateClienteSnapshot,
@@ -367,6 +368,116 @@ fattureRoute.post('/:id/annulla-pagamento', async (c) => {
 
   const [row] = await db.select().from(fatture).where(eq(fatture.id, id)).limit(1);
   return c.json(toPublic(row!));
+});
+
+// ─────────── POST /import-xml ───────────
+
+/** Crea un cliente dallo snapshot import. Ritorna l'id o null se fallisce. */
+async function tryCreateClienteFromSnapshot(
+  db: Db, profileId: string, snap: z.infer<typeof ImportXmlBody>['items'][number]['clienteSnapshot'],
+): Promise<string | null> {
+  const id = randomUUID();
+  try {
+    await db.insert(clienti).values({
+      id, profileId,
+      nome: snap.nome || '(senza nome)',
+      tipoCliente: snap.tipoCliente || 'PG',
+      partitaIva: snap.partitaIva ?? null,
+      codiceFiscale: snap.codiceFiscale ?? null,
+      codiceSdi: snap.codiceSdi ?? null,
+      pec: snap.pec ?? null,
+      indirizzo: snap.indirizzo ?? null,
+      cap: snap.cap ?? null,
+      citta: snap.citta ?? null,
+      provincia: snap.provincia ?? null,
+      nazione: snap.nazione || 'IT',
+    });
+    return id;
+  } catch {
+    return null; // P.IVA/CF duplicata o dato invalido: la fattura entra con clienteId null
+  }
+}
+
+fattureRoute.post('/import-xml', zJson(ImportXmlBody), async (c) => {
+  const db = c.get('db');
+  const profileId = c.get('activeProfileId');
+  const { items } = c.req.valid('json') as z.infer<typeof ImportXmlBody>;
+
+  const clientiRows = await db.select({ id: clienti.id, partitaIva: clienti.partitaIva, codiceFiscale: clienti.codiceFiscale })
+    .from(clienti).where(eq(clienti.profileId, profileId));
+  const fattureRows = await db.select({
+    tipoDocumento: fatture.tipoDocumento, annoProgressivo: fatture.annoProgressivo,
+    progressivo: fatture.progressivo, numeroDisplay: fatture.numeroDisplay,
+  }).from(fatture).where(eq(fatture.profileId, profileId));
+
+  const clientiList = clientiRows.map((r) => ({ id: r.id, partitaIva: r.partitaIva, codiceFiscale: r.codiceFiscale }));
+  const seenDedup = new Set<string>();
+  const seenProg = new Set<string>();
+  for (const f of fattureRows) {
+    seenDedup.add(`${f.tipoDocumento}|${f.annoProgressivo}|${f.progressivo}|${f.numeroDisplay ?? ''}`);
+    if (f.progressivo != null) seenProg.add(`${f.annoProgressivo}|${f.progressivo}`);
+  }
+  const createdClienti = new Map<string, string>();
+  const report = { importate: 0, clientiCreati: 0, saltate: [] as Array<{ numero: string; motivo: string }> };
+
+  for (const item of items) {
+    // dedupKey usa numeroDisplay (ciò che è in DB sulle fatture esistenti),
+    // non il numero raw: per i formati 'N/AAAA' i due divergono.
+    const dk = dedupKey({ tipoDocumento: item.tipoDocumento, annoProgressivo: item.annoProgressivo, progressivo: item.progressivo, numero: item.numeroDisplay });
+    if (seenDedup.has(dk)) { report.saltate.push({ numero: item.numero, motivo: 'duplicato' }); continue; }
+    const progKey = `${item.annoProgressivo}|${item.progressivo}`;
+    if (item.progressivo > 0 && seenProg.has(progKey)) {
+      report.saltate.push({ numero: item.numero, motivo: 'progressivo già in uso' }); continue;
+    }
+
+    let clienteId: string | null = matchCliente(item.clienteSnapshot, clientiList);
+    if (!clienteId) {
+      const key = `${(item.clienteSnapshot.partitaIva ?? '').trim().toUpperCase()}|${(item.clienteSnapshot.codiceFiscale ?? '').trim().toUpperCase()}`;
+      if (key !== '|' && createdClienti.has(key)) {
+        clienteId = createdClienti.get(key)!;
+      } else {
+        clienteId = await tryCreateClienteFromSnapshot(db, profileId, item.clienteSnapshot);
+        if (clienteId) {
+          report.clientiCreati++;
+          clientiList.push({ id: clienteId, partitaIva: item.clienteSnapshot.partitaIva ?? null, codiceFiscale: item.clienteSnapshot.codiceFiscale ?? null });
+          if (key !== '|') createdClienti.set(key, clienteId);
+        }
+      }
+    }
+
+    const id = randomUUID();
+    const values: FatturaInsert = {
+      id, profileId,
+      clienteId,
+      tipoDocumento: item.tipoDocumento,
+      annoProgressivo: item.annoProgressivo,
+      progressivo: item.progressivo > 0 ? item.progressivo : null,
+      numeroDisplay: item.numeroDisplay,
+      data: item.data,
+      clienteSnapshot: JSON.stringify(item.clienteSnapshot),
+      righe: JSON.stringify(item.righe),
+      importo: computeImporto(item.righe), // ricalcolato server-side (no trust sul client)
+      ritenuta: 0,
+      contributoIntegrativo: 0,
+      marcaDaBollo: item.marcaDaBollo ? 1 : 0,
+      bolloAddebitato: 0,
+      stato: 'inviata',
+      dataInvioSdi: item.data,
+      modalitaPagamento: item.modalitaPagamento ?? null,
+      origine: 'import',
+    };
+    try {
+      await db.insert(fatture).values(values);
+    } catch {
+      report.saltate.push({ numero: item.numero, motivo: 'progressivo già in uso' });
+      continue;
+    }
+    report.importate++;
+    seenDedup.add(dk);
+    if (item.progressivo > 0) seenProg.add(progKey);
+  }
+
+  return c.json(report);
 });
 
 // ─────────── POST /:id/nota-credito ───────────

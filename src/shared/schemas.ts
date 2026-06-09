@@ -306,3 +306,37 @@ export const NotaCreditoCreateInput = z.object({
   righe: z.array(RigaSchema).min(1, 'Almeno una riga'),
   note: z.string().trim().optional().nullable(),
 });
+
+// ───── Import XML FatturaPA (Slice 5E) ─────
+
+export const ImportClienteSnapshot = z.object({
+  nome: z.string(),
+  tipoCliente: z.string(),
+  partitaIva: z.string().nullable().optional(),
+  codiceFiscale: z.string().nullable().optional(),
+  codiceSdi: z.string().nullable().optional(),
+  pec: z.string().nullable().optional(),
+  indirizzo: z.string().nullable().optional(),
+  cap: z.string().nullable().optional(),
+  citta: z.string().nullable().optional(),
+  provincia: z.string().nullable().optional(),
+  nazione: z.string(),
+});
+
+export const ImportFatturaInput = z.object({
+  tipoDocumento: TipoDocumentoEnum,
+  numero: z.string(),
+  data: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  annoProgressivo: z.number().int(),
+  progressivo: z.number().int(),
+  numeroDisplay: z.string(),
+  righe: z.array(RigaSchema).min(1),
+  importo: z.number(),
+  marcaDaBollo: z.boolean(),
+  modalitaPagamento: z.string().nullable().default(null),
+  clienteSnapshot: ImportClienteSnapshot,
+});
+
+export const ImportXmlBody = z.object({
+  items: z.array(ImportFatturaInput).min(1).max(500),
+});

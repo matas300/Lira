@@ -406,3 +406,103 @@ test('POST /:id/nota-credito — su una NC (TD04) → 409 NC_ORIGINALE_NON_TD01'
   assert.equal(r.status, 409);
   assert.equal(((await r.json()) as any).error.code, 'NC_ORIGINALE_NON_TD01');
 });
+
+// ───── Import XML (Slice 5E) ─────
+
+function importItem(over: any = {}) {
+  return {
+    tipoDocumento: 'TD01', numero: '2026/1', data: '2026-03-01',
+    annoProgressivo: 2026, progressivo: 1, numeroDisplay: '2026/1',
+    righe: [{ descrizione: 'Consulenza', prezzoUnitario: 1000 }], importo: 1000,
+    marcaDaBollo: true, modalitaPagamento: 'MP05',
+    clienteSnapshot: { nome: 'ACME Srl', tipoCliente: 'PG', partitaIva: '00743110157', nazione: 'IT' },
+    ...over,
+  };
+}
+
+test('POST /import-xml — importa fattura come inviata, match cliente esistente', async () => {
+  const { app, headers } = await makeApp(); // makeApp crea un cliente con P.IVA 00743110157
+  const r = await app.request('/api/fatture/import-xml', {
+    method: 'POST', headers: J(headers), body: JSON.stringify({ items: [importItem()] }),
+  });
+  assert.equal(r.status, 200);
+  const rep = (await r.json()) as any;
+  assert.equal(rep.importate, 1);
+  assert.equal(rep.clientiCreati, 0);
+  const list = await (await app.request('/api/fatture', { headers })).json() as any[];
+  assert.equal(list.length, 1);
+  assert.equal(list[0]!.stato, 'inviata');
+  assert.equal(list[0]!.numeroDisplay, '2026/1');
+});
+
+test('POST /import-xml — crea cliente nuovo se non matcha', async () => {
+  const { app, db, headers, profileId } = await makeApp();
+  const r = await app.request('/api/fatture/import-xml', {
+    method: 'POST', headers: J(headers),
+    body: JSON.stringify({ items: [importItem({
+      clienteSnapshot: { nome: 'Nuovo Cliente Srl', tipoCliente: 'PG', partitaIva: '12345670785', nazione: 'IT' },
+    })] }),
+  });
+  const rep = (await r.json()) as any;
+  assert.equal(rep.importate, 1);
+  assert.equal(rep.clientiCreati, 1);
+  const rows = await db.select().from(clienti).where(eqDrizzle(clienti.profileId, profileId));
+  assert.ok(rows.some((c) => c.partitaIva === '12345670785'));
+});
+
+test('POST /import-xml — re-import stesso file → tutto saltato (dedup)', async () => {
+  const { app, headers } = await makeApp();
+  const body = JSON.stringify({ items: [importItem()] });
+  await app.request('/api/fatture/import-xml', { method: 'POST', headers: J(headers), body });
+  const r2 = await app.request('/api/fatture/import-xml', { method: 'POST', headers: J(headers), body });
+  const rep = (await r2.json()) as any;
+  assert.equal(rep.importate, 0);
+  assert.equal(rep.saltate.length, 1);
+  assert.match(rep.saltate[0].motivo, /duplicat/i);
+});
+
+test('POST /import-xml — collisione progressivo (fattura diversa, stesso progressivo) → saltata', async () => {
+  const { app, headers } = await makeApp();
+  await app.request('/api/fatture/import-xml', { method: 'POST', headers: J(headers), body: JSON.stringify({ items: [importItem()] }) });
+  // fattura DIVERSA (numeroDisplay diverso) ma stesso (anno, progressivo)
+  const r = await app.request('/api/fatture/import-xml', {
+    method: 'POST', headers: J(headers),
+    body: JSON.stringify({ items: [importItem({ numero: 'ALT-1', numeroDisplay: '2026/1-ALT' })] }),
+  });
+  const rep = (await r.json()) as any;
+  assert.equal(rep.importate, 0);
+  assert.match(rep.saltate[0].motivo, /progressivo/i);
+});
+
+test('POST /import-xml — TD04 importata senza storno', async () => {
+  const { app, headers } = await makeApp();
+  const r = await app.request('/api/fatture/import-xml', {
+    method: 'POST', headers: J(headers),
+    body: JSON.stringify({ items: [importItem({ tipoDocumento: 'TD04', numero: '2026/2', progressivo: 2, numeroDisplay: '2026/2' })] }),
+  });
+  const rep = (await r.json()) as any;
+  assert.equal(rep.importate, 1);
+  const list = await (await app.request('/api/fatture?stato=inviata', { headers })).json() as any[];
+  assert.ok(list.some((f) => f.tipoDocumento === 'TD04'));
+});
+
+test('POST /import-xml — importo ricalcolato dal server (anti-falsificazione)', async () => {
+  const { app, headers } = await makeApp();
+  const r = await app.request('/api/fatture/import-xml', {
+    method: 'POST', headers: J(headers),
+    body: JSON.stringify({ items: [importItem({ importo: 99999 })] }), // righe: 1×1000
+  });
+  assert.equal(((await r.json()) as any).importate, 1);
+  const list = await (await app.request('/api/fatture', { headers })).json() as any[];
+  assert.equal(list[0]!.importo, 1000); // ricalcolato da righe, non 99999
+});
+
+test('POST /import-xml — dedup per numeroDisplay (re-import formato N/AAAA → duplicato)', async () => {
+  const { app, headers } = await makeApp();
+  const it = importItem({ numero: '3/2026', numeroDisplay: '2026/3', progressivo: 3 });
+  await app.request('/api/fatture/import-xml', { method: 'POST', headers: J(headers), body: JSON.stringify({ items: [it] }) });
+  const r2 = await app.request('/api/fatture/import-xml', { method: 'POST', headers: J(headers), body: JSON.stringify({ items: [it] }) });
+  const rep = (await r2.json()) as any;
+  assert.equal(rep.importate, 0);
+  assert.match(rep.saltate[0].motivo, /duplicat/i);
+});

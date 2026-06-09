@@ -2,7 +2,7 @@
 // Run with: node scripts/smoke-playwright.mjs
 
 import { chromium } from 'playwright';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 const SCREENSHOT_DIR = 'C:/tmp/lira-smoke';
@@ -196,6 +196,32 @@ async function main() {
   } else {
     check('Pulsante paga presente', false, 'nessun [data-paga]');
   }
+
+  // ─── STEP 4D: Import XML (Slice 5E) ───
+  console.log('\n=== STEP 4D: Import XML ===');
+  const tmpXml = join(SCREENSHOT_DIR, 'smoke-fattura.xml');
+  const xmlContent = `<?xml version="1.0" encoding="UTF-8"?>
+<p:FatturaElettronica versione="FPR12" xmlns:p="http://ivaservizi.agenziaentrate.gov.it/docs/xsd/fatture/v1.2">
+  <FatturaElettronicaHeader><CessionarioCommittente>
+    <DatiAnagrafici><IdFiscaleIVA><IdPaese>IT</IdPaese><IdCodice>00743110157</IdCodice></IdFiscaleIVA>
+      <Anagrafica><Denominazione>Smoke Import Srl</Denominazione></Anagrafica></DatiAnagrafici>
+    <Sede><Indirizzo>Via Test 1</Indirizzo><CAP>20100</CAP><Comune>Milano</Comune><Provincia>MI</Provincia><Nazione>IT</Nazione></Sede>
+  </CessionarioCommittente></FatturaElettronicaHeader>
+  <FatturaElettronicaBody>
+    <DatiGenerali><DatiGeneraliDocumento><TipoDocumento>TD01</TipoDocumento><Data>2026-07-01</Data><Numero>2026/99</Numero><ImportoTotaleDocumento>500.00</ImportoTotaleDocumento></DatiGeneraliDocumento></DatiGenerali>
+    <DatiBeniServizi><DettaglioLinee><Descrizione>Servizio importato</Descrizione><Quantita>1.00</Quantita><PrezzoUnitario>500.00</PrezzoUnitario><PrezzoTotale>500.00</PrezzoTotale></DettaglioLinee></DatiBeniServizi>
+  </FatturaElettronicaBody>
+</p:FatturaElettronica>`;
+  await writeFile(tmpXml, xmlContent, 'utf8');
+  await page.goto(`${BASE_URL}/fatture`, { waitUntil: 'networkidle' });
+  await page.waitForTimeout(1000);
+  page.once('dialog', (d) => d.accept()); // alert del report
+  await page.setInputFiles('[data-xml-input]', tmpXml);
+  await page.waitForTimeout(2000);
+  const listImport = await page.textContent('[data-list]').catch(() => '');
+  check('Fattura XML importata (2026/99 in lista)', !!listImport && listImport.includes('2026/99'),
+    `list="${(listImport || '').slice(0, 140)}"`);
+  await screenshot(page, '05k-import-xml');
 
   // Torno alla dashboard per non perturbare gli step profili successivi
   await page.goto(BASE_URL, { waitUntil: 'networkidle' });
