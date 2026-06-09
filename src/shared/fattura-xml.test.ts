@@ -154,3 +154,30 @@ test('buildFatturaXml — rimborso bollo addebitato -> riga + DatiRiepilogo N1',
   assert.match(xml, /<Descrizione>Rimborso imposta di bollo<\/Descrizione>/);
   assert.match(xml, /<Natura>N1<\/Natura>/);
 });
+
+// ───── Golden XML di regressione (Task review 5B) ─────
+// Confronto byte-a-byte con un riferimento conforme: difesa contro riordini
+// accidentali degli elementi (scarto SdI 00400). CRLF normalizzato a LF perché
+// git può convertire il .xml su Windows (autocrlf).
+import { readFileSync } from 'node:fs';
+
+test('GOLDEN — XML TD01 forfettario byte-identico al riferimento', () => {
+  const golden = readFileSync(new URL('./__fixtures__/fattura-golden.xml', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+  const goldenInput: FatturaXmlInput = {
+    cedente: {
+      partitaIva: '00743110157', codiceFiscale: 'RSSMRA80A01H501U', nome: 'Mario', cognome: 'Rossi',
+      indirizzo: 'Via Roma 1', cap: '20100', comune: 'Milano', provincia: 'MI', nazione: 'IT',
+      regime: 'forfettario',
+    },
+    cliente: {
+      nome: 'ACME Srl', tipoCliente: 'PG', partitaIva: '00743110157', codiceFiscale: null,
+      codiceSdi: '0000000', pec: null, indirizzo: 'Via Po 2', cap: '10100', citta: 'Torino',
+      provincia: 'TO', nazione: 'IT',
+    },
+    numero: '2026/1', data: '2026-03-01',
+    righe: [{ descrizione: 'Consulenza informatica', quantita: 2, prezzoUnitario: 500 }],
+    importo: 1000, ritenuta: 0, aliquotaRitenuta: null, tipoRitenuta: null, causaleRitenuta: null,
+    marcaDaBollo: true, bolloAddebitato: false, modalitaPagamento: 'bonifico', contributoIntegrativo: 0,
+  };
+  assert.equal(buildFatturaXml(goldenInput), golden);
+});
