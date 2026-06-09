@@ -72,3 +72,22 @@ test('FatturaCreateInput — data non ISO → throw', () => {
     clienteId: 'c1', data: '01/03/2026', righe: [{ descrizione: 'x', prezzoUnitario: 1 }],
   }));
 });
+
+// ───── Note di Credito (Slice 5C) ─────
+import { NotaCreditoCreateInput } from './schemas';
+
+test('NotaCreditoCreateInput — minimo valido', () => {
+  const nc = NotaCreditoCreateInput.parse({
+    data: '2026-04-01', righe: [{ descrizione: 'Storno', prezzoUnitario: 100 }],
+  });
+  assert.equal(nc.righe[0]!.quantita, 1);
+  assert.equal(nc.righe[0]!.prezzoUnitario, 100);
+});
+
+test('NotaCreditoCreateInput — righe vuote → throw', () => {
+  assert.throws(() => NotaCreditoCreateInput.parse({ data: '2026-04-01', righe: [] }));
+});
+
+test('NotaCreditoCreateInput — data non ISO → throw', () => {
+  assert.throws(() => NotaCreditoCreateInput.parse({ data: '01/04/2026', righe: [{ descrizione: 'x', prezzoUnitario: 1 }] }));
+});
