@@ -43,3 +43,6 @@ export type Riga = z.infer<typeof RigaSchemaSchema>;
 export type FatturaCreateInput = z.infer<typeof FatturaCreateInputSchema>;
 export type FatturaUpdateInput = z.infer<typeof FatturaUpdateInputSchema>;
 export type FatturaPublic = z.infer<typeof FatturaPublicSchema>;
+
+import { NotaCreditoCreateInput as NotaCreditoCreateInputSchema } from './schemas';
+export type NotaCreditoCreateInput = z.infer<typeof NotaCreditoCreateInputSchema>;

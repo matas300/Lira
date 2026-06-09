@@ -7,7 +7,7 @@ import { openModal } from '../components/modal';
 import { listClienti } from '../lib/clienti-api';
 import {
   listFatture, createFattura, updateFattura, removeFattura,
-  inviaFattura, pagaFattura, downloadFatturaXml,
+  inviaFattura, pagaFattura, downloadFatturaXml, createNotaCredito,
 } from '../lib/fatture-api';
 import type { FatturaPublic, ClientePublic, Riga } from '@shared/types';
 
@@ -59,12 +59,15 @@ export function mount(container: HTMLElement): () => void {
     const xmlBtn = f.stato !== 'bozza'
       ? `<button class="btn btn-ghost" data-xml="${esc(f.id)}" title="Scarica XML">XML</button>`
       : '';
+    const ncBtn = (f.tipoDocumento === 'TD01' && (f.stato === 'inviata' || f.stato === 'pagata'))
+      ? `<button class="btn btn-ghost" data-nc="${esc(f.id)}" title="Crea nota di credito">NC</button>`
+      : '';
     const azioni = f.stato === 'bozza'
       ? `<button class="btn btn-ghost" data-invia="${esc(f.id)}" title="Segna inviata">✉</button>
          <button class="btn btn-ghost" data-del="${esc(f.id)}" title="Elimina" style="color:var(--red);">✕</button>`
       : f.stato === 'inviata'
-        ? `${xmlBtn}<button class="btn btn-ghost" data-paga="${esc(f.id)}" title="Segna pagata">€</button>`
-        : xmlBtn;
+        ? `${xmlBtn}${ncBtn}<button class="btn btn-ghost" data-paga="${esc(f.id)}" title="Segna pagata">€</button>`
+        : `${xmlBtn}${ncBtn}`;
     return `
       <li data-id="${esc(f.id)}" class="fattura-row"
           style="display:grid;grid-template-columns:80px 1fr 90px 90px auto;gap:var(--space-2);align-items:center;
@@ -73,7 +76,7 @@ export function mount(container: HTMLElement): () => void {
         <span class="fattura-open" style="cursor:pointer;"><strong>${esc(clienteNome(f))}</strong>
           <span style="color:var(--text-muted);"> ${esc(f.dataInvioSdi ?? f.data)}</span></span>
         <span style="text-align:right;">${eur(f.importo)}</span>
-        <span style="color:var(--text-muted);">${esc(stato)}</span>
+        <span style="color:var(--text-muted);">${f.tipoDocumento === 'TD04' ? 'NC ' : ''}${esc(stato)}${f.ncTotaleImporto > 0 && f.stato !== 'stornata' ? ` · stornato ${eur(f.ncTotaleImporto)}` : ''}</span>
         <span style="display:flex;gap:var(--space-1);justify-content:flex-end;">${azioni}</span>
       </li>`;
   }
@@ -187,6 +190,45 @@ export function mount(container: HTMLElement): () => void {
     activeModalClose = handle.close;
   }
 
+  function openNotaCreditoModal(orig: FatturaPublic): void {
+    const righeInit = orig.righe.length ? orig.righe : [{ descrizione: '', quantita: 1, prezzoUnitario: 0 }];
+    const handle = openModal({
+      title: `Nota di credito su ${orig.numeroDisplay ?? ''}`,
+      bodyHtml: `
+        <form data-form style="display:flex;flex-direction:column;gap:var(--space-3);">
+          <p style="color:var(--text-muted);">Storno di ${esc(orig.numeroDisplay ?? '')} — ${esc(clienteNome(orig))}. Riduci gli importi per uno storno parziale.</p>
+          <div class="form-row"><label>Data *</label>
+            <input class="input" type="date" data-data value="${esc(orig.data)}" /></div>
+          <div><label>Righe</label>
+            <div data-righe style="display:flex;flex-direction:column;gap:var(--space-2);">${righeInit.map((r) => rigaInputs(r)).join('')}</div></div>
+          <div style="text-align:right;font-weight:600;">Totale storno: <span data-totale>—</span></div>
+          <p class="form-error" data-error hidden></p>
+          <button type="submit" class="btn btn-primary">Crea nota di credito</button>
+        </form>`,
+      onMount: (root, close) => {
+        const form = root.querySelector<HTMLFormElement>('[data-form]')!;
+        const errorEl = root.querySelector<HTMLElement>('[data-error]')!;
+        root.querySelectorAll<HTMLInputElement>('input').forEach((i) => i.addEventListener('input', () => recalcTotale(root)));
+        recalcTotale(root);
+        form.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          errorEl.hidden = true;
+          try {
+            await createNotaCredito(orig.id, {
+              data: root.querySelector<HTMLInputElement>('[data-data]')!.value,
+              righe: readRighe(root),
+            } as never);
+            close(); await refresh();
+          } catch (err) {
+            errorEl.textContent = err instanceof ApiError ? err.message : 'Errore creazione NC';
+            errorEl.hidden = false;
+          }
+        });
+      },
+    });
+    activeModalClose = handle.close;
+  }
+
   function renderList(): void {
     const ul = container.querySelector<HTMLElement>('[data-list]');
     if (!ul) return;
@@ -219,6 +261,10 @@ export function mount(container: HTMLElement): () => void {
     ul.querySelectorAll<HTMLButtonElement>('[data-xml]').forEach((b) => b.addEventListener('click', async () => {
       try { await downloadFatturaXml(b.dataset.xml!); }
       catch (err) { alert(err instanceof ApiError ? err.message : 'Errore generazione XML'); }
+    }));
+    ul.querySelectorAll<HTMLButtonElement>('[data-nc]').forEach((b) => b.addEventListener('click', () => {
+      const f = fatture.find((x) => x.id === b.dataset.nc);
+      if (f) openNotaCreditoModal(f);
     }));
   }
 

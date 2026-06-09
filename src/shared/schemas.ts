@@ -274,6 +274,9 @@ export const FatturaPublic = z.object({
   annoProgressivo: z.number(),
   progressivo: z.number().nullable(),
   numeroDisplay: z.string().nullable(),
+  fatturaOriginaleId: z.string().nullable(),
+  tipoStorno: z.string().nullable(),
+  ncTotaleImporto: z.number(),
   data: z.string(),
   clienteSnapshot: z.record(z.unknown()).nullable(),
   righe: z.array(RigaPublic),
@@ -294,4 +297,12 @@ export const FatturaPublic = z.object({
   note: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
+});
+
+// ───── Note di Credito (Slice 5C) ─────
+
+export const NotaCreditoCreateInput = z.object({
+  data: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data attesa in formato YYYY-MM-DD'),
+  righe: z.array(RigaSchema).min(1, 'Almeno una riga'),
+  note: z.string().trim().optional().nullable(),
 });

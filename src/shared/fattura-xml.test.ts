@@ -155,6 +155,38 @@ test('buildFatturaXml — rimborso bollo addebitato -> riga + DatiRiepilogo N1',
   assert.match(xml, /<Natura>N1<\/Natura>/);
 });
 
+// ───── TD04 (Slice 5C) ─────
+
+test('buildFatturaXml — TD04: importi negativi + DatiFattureCollegate', () => {
+  const xml = buildFatturaXml({
+    ...inputBase(),
+    tipoDocumento: 'TD04',
+    fatturaOriginale: { numero: '2026/1', data: '2026-03-01' },
+    marcaDaBollo: false,
+  });
+  assert.match(xml, /<TipoDocumento>TD04<\/TipoDocumento>/);
+  assert.match(xml, /<PrezzoTotale>-1000\.00<\/PrezzoTotale>/);
+  assert.match(xml, /<ImponibileImporto>-1000\.00<\/ImponibileImporto>/);
+  assert.match(xml, /<ImportoTotaleDocumento>-1000\.00<\/ImportoTotaleDocumento>/);
+  assert.match(xml, /<DatiFattureCollegate>\s*<RiferimentoNumeroLinea>1<\/RiferimentoNumeroLinea>\s*<IdDocumento>2026\/1<\/IdDocumento>\s*<Data>2026-03-01<\/Data>\s*<\/DatiFattureCollegate>/);
+  assert.ok(!/<DatiBollo>/.test(xml));
+});
+
+test('buildFatturaXml — TD04: DatiFattureCollegate dopo DatiGeneraliDocumento (ordine XSD)', () => {
+  const xml = buildFatturaXml({
+    ...inputBase(), tipoDocumento: 'TD04',
+    fatturaOriginale: { numero: '2026/1', data: '2026-03-01' }, marcaDaBollo: false,
+  });
+  assert.ok(xml.indexOf('</DatiGeneraliDocumento>') < xml.indexOf('<DatiFattureCollegate>'), 'DatiFattureCollegate deve seguire DatiGeneraliDocumento');
+});
+
+test('buildFatturaXml — TD01 invariato (default tipoDocumento)', () => {
+  const xml = buildFatturaXml(inputBase());
+  assert.match(xml, /<TipoDocumento>TD01<\/TipoDocumento>/);
+  assert.match(xml, /<ImponibileImporto>1000\.00<\/ImponibileImporto>/);
+  assert.ok(!/<DatiFattureCollegate>/.test(xml));
+});
+
 // ───── Golden XML di regressione (Task review 5B) ─────
 // Confronto byte-a-byte con un riferimento conforme: difesa contro riordini
 // accidentali degli elementi (scarto SdI 00400). CRLF normalizzato a LF perché
@@ -180,4 +212,20 @@ test('GOLDEN — XML TD01 forfettario byte-identico al riferimento', () => {
     marcaDaBollo: true, bolloAddebitato: false, modalitaPagamento: 'bonifico', contributoIntegrativo: 0,
   };
   assert.equal(buildFatturaXml(goldenInput), golden);
+});
+
+test('GOLDEN — XML TD04 byte-identico al riferimento', () => {
+  const golden = readFileSync(new URL('./__fixtures__/nota-credito-golden.xml', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+  const input: FatturaXmlInput = {
+    cedente: { partitaIva: '00743110157', codiceFiscale: 'RSSMRA80A01H501U', nome: 'Mario', cognome: 'Rossi',
+      indirizzo: 'Via Roma 1', cap: '20100', comune: 'Milano', provincia: 'MI', nazione: 'IT', regime: 'forfettario' },
+    cliente: { nome: 'ACME Srl', tipoCliente: 'PG', partitaIva: '00743110157', codiceFiscale: null,
+      codiceSdi: '0000000', pec: null, indirizzo: 'Via Po 2', cap: '10100', citta: 'Torino', provincia: 'TO', nazione: 'IT' },
+    numero: '2026/2', data: '2026-04-01',
+    righe: [{ descrizione: 'Storno consulenza informatica', quantita: 2, prezzoUnitario: 500 }],
+    importo: 1000, ritenuta: 0, aliquotaRitenuta: null, tipoRitenuta: null, causaleRitenuta: null,
+    marcaDaBollo: false, bolloAddebitato: false, modalitaPagamento: 'bonifico', contributoIntegrativo: 0,
+    tipoDocumento: 'TD04', fatturaOriginale: { numero: '2026/1', data: '2026-03-01' },
+  };
+  assert.equal(buildFatturaXml(input), golden);
 });
