@@ -1,6 +1,6 @@
 // src/client/lib/fatture-api.ts
 import { api, ApiError } from './api';
-import type { FatturaPublic, FatturaCreateInput, FatturaUpdateInput } from '@shared/types';
+import type { FatturaPublic, FatturaCreateInput, FatturaUpdateInput, NotaCreditoCreateInput } from '@shared/types';
 
 export function listFatture(stato?: string): Promise<FatturaPublic[]> {
   const q = stato ? `?stato=${encodeURIComponent(stato)}` : '';
@@ -33,6 +33,10 @@ export function pagaFattura(id: string, date?: string): Promise<FatturaPublic> {
 
 export function annullaPagamento(id: string): Promise<FatturaPublic> {
   return api.post<FatturaPublic>(`/api/fatture/${id}/annulla-pagamento`, {});
+}
+
+export function createNotaCredito(fatturaId: string, input: NotaCreditoCreateInput): Promise<FatturaPublic> {
+  return api.post<FatturaPublic>(`/api/fatture/${fatturaId}/nota-credito`, input);
 }
 
 /** Scarica l'XML FatturaPA della fattura. Su errore lancia ApiError col messaggio del server. */
