@@ -393,3 +393,16 @@ test('GET /:id/xml — NC TD04 → XML TD04, importi negativi, DatiFattureColleg
   assert.match(xml, /<ImponibileImporto>-1000\.00<\/ImponibileImporto>/);
   assert.match(xml, /<IdDocumento>2026\/1<\/IdDocumento>/);
 });
+
+test('POST /:id/nota-credito — su una NC (TD04) → 409 NC_ORIGINALE_NON_TD01', async () => {
+  const { app, db, headers, profileId } = await makeApp();
+  await setCedente(db, profileId);
+  const cId = await clienteCompleto(db, profileId);
+  const orig = await inviaOriginale(app, headers, cId);
+  const nc = await creaEInviaNC(app, headers, orig.id, 300); // parziale: la NC resta inviata, non stornata
+  const r = await app.request(`/api/fatture/${nc.id}/nota-credito`, {
+    method: 'POST', headers: J(headers), body: JSON.stringify({ data: '2026-05-01', righe: [{ descrizione: 'x', prezzoUnitario: 100 }] }),
+  });
+  assert.equal(r.status, 409);
+  assert.equal(((await r.json()) as any).error.code, 'NC_ORIGINALE_NON_TD01');
+});

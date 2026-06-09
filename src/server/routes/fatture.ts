@@ -259,49 +259,64 @@ fattureRoute.post('/:id/invia', async (c) => {
   // committato, quindi due /invia concorrenti (stessa o diverse fatture) non
   // possono collidere né lasciare buchi. Il perdente vede 0 righe → 409.
   const nextProg = sql`(select coalesce(max(${fatture.progressivo}), 0) + 1 from ${fatture} where ${fatture.profileId} = ${profileId} and ${fatture.annoProgressivo} = ${anno})`;
-
-  const updated = await db.update(fatture).set({
+  const numberingSet = {
     progressivo: nextProg,
     numeroDisplay: sql`${String(anno)} || '/' || ${nextProg}`,
     stato: 'inviata',
     dataInvioSdi: iso,
     marcaDaBollo: bolloFlag,
     updatedAt: new Date().toISOString(),
-  }).where(and(
+  };
+  const numberingWhere = and(
     eq(fatture.id, id), eq(fatture.profileId, profileId), eq(fatture.stato, 'bozza'),
-  )).returning({ id: fatture.id });
+  );
 
-  if (updated.length === 0) {
-    // Richiesta concorrente (o doppio click) ha già inviato la fattura.
-    throw new HttpError(409, 'FATTURA_NOT_INVIABILE', 'Fattura già inviata o non più in bozza');
+  // Applica lo storno all'originale (idempotente). `nc` è la NC TD04 appena
+  // numerata; usato solo dentro la transazione del path NC.
+  async function applyStorno(tx: any, nc: FatturaRow): Promise<void> {
+    const [orig] = await tx.select().from(fatture)
+      .where(and(eq(fatture.id, nc.fatturaOriginaleId!), eq(fatture.profileId, profileId))).limit(1);
+    if (!orig) return; // originale cancellato (FK set null): niente storno
+    const res = computeStorno({
+      originaleImporto: orig.importo,
+      originaleStato: orig.stato,
+      originaleNcIds: parseJson<string[]>(orig.ncIds, []),
+      originaleNcTotaleImporto: orig.ncTotaleImporto,
+      ncId: nc.id,
+      ncImporto: nc.importo,
+    });
+    const nowIso = new Date().toISOString();
+    if (res.applied) {
+      await tx.update(fatture).set({
+        ncIds: JSON.stringify(res.ncIds),
+        ncTotaleImporto: res.ncTotaleImporto,
+        stato: res.stato,
+        updatedAt: nowIso,
+      }).where(and(eq(fatture.id, orig.id), eq(fatture.profileId, profileId)));
+    }
+    await tx.update(fatture).set({ tipoStorno: res.tipoStorno, updatedAt: nowIso })
+      .where(and(eq(fatture.id, nc.id), eq(fatture.profileId, profileId)));
   }
 
-  // Side-effect NC TD04: applica lo storno all'originale (idempotente).
   if (f.tipoDocumento === 'TD04' && f.fatturaOriginaleId) {
+    // NC: numerazione + storno ATOMICI nella stessa transazione. Se lo storno
+    // fallisce, il rollback annulla anche la numerazione (niente crash-between
+    // che lascerebbe la NC inviata ma l'originale non stornato).
+    const nc = f;
     await db.transaction(async (tx) => {
-      const [orig] = await tx.select().from(fatture)
-        .where(and(eq(fatture.id, f.fatturaOriginaleId!), eq(fatture.profileId, profileId))).limit(1);
-      if (!orig) return; // originale cancellato (FK set null): niente storno
-      const res = computeStorno({
-        originaleImporto: orig.importo,
-        originaleStato: orig.stato,
-        originaleNcIds: parseJson<string[]>(orig.ncIds, []),
-        originaleNcTotaleImporto: orig.ncTotaleImporto,
-        ncId: f.id,
-        ncImporto: f.importo,
-      });
-      const nowIso = new Date().toISOString();
-      if (res.applied) {
-        await tx.update(fatture).set({
-          ncIds: JSON.stringify(res.ncIds),
-          ncTotaleImporto: res.ncTotaleImporto,
-          stato: res.stato,
-          updatedAt: nowIso,
-        }).where(and(eq(fatture.id, orig.id), eq(fatture.profileId, profileId)));
+      const updated = await tx.update(fatture).set(numberingSet).where(numberingWhere).returning({ id: fatture.id });
+      if (updated.length === 0) {
+        throw new HttpError(409, 'FATTURA_NOT_INVIABILE', 'Fattura già inviata o non più in bozza');
       }
-      await tx.update(fatture).set({ tipoStorno: res.tipoStorno, updatedAt: nowIso })
-        .where(and(eq(fatture.id, f.id), eq(fatture.profileId, profileId)));
+      await applyStorno(tx, nc);
     });
+  } else {
+    // TD01: numerazione atomica in singolo statement (no transazione → preserva
+    // il comportamento concorrente di 5A: due /invia danno [200, 409], no 500).
+    const updated = await db.update(fatture).set(numberingSet).where(numberingWhere).returning({ id: fatture.id });
+    if (updated.length === 0) {
+      throw new HttpError(409, 'FATTURA_NOT_INVIABILE', 'Fattura già inviata o non più in bozza');
+    }
   }
 
   const [row] = await db.select().from(fatture).where(eq(fatture.id, id)).limit(1);
@@ -369,6 +384,9 @@ fattureRoute.post('/:id/nota-credito', zJson(NotaCreditoCreateInput), async (c) 
   }
   if (orig.stato === 'stornata') {
     throw new HttpError(409, 'NC_ORIGINALE_STORNATA', 'La fattura è già stornata');
+  }
+  if (orig.tipoDocumento !== 'TD01') {
+    throw new HttpError(409, 'NC_ORIGINALE_NON_TD01', 'La nota di credito può essere creata solo su una fattura TD01');
   }
   if (!isNCDateValid(body.data, orig.data)) {
     throw new HttpError(422, 'NC_DATA_ANTERIORE', `La data NC (${body.data}) non può precedere l'originale (${orig.data})`);
