@@ -39,10 +39,10 @@
 ### Fase 5 — Fatture (modulo principale)
 - [x] Creazione fattura via modal (TD01) + numerazione atomica all'invio (Slice 5A, 2026-06-08)
 - [x] Storico fatture (tabella, filtri, stato) + pagina `/fatture` (Slice 5A, 2026-06-08)
-- [x] State machine bozza → inviata → pagata (+ annulla-pagamento); NC TD04 → stornata rinviata a 5B (Slice 5A, 2026-06-08)
-- [ ] Generazione XML FatturaPA v1.2 (TD01 + TD04) — porta logica da CalcoliVari
+- [x] State machine bozza → inviata → pagata (+ annulla-pagamento); NC TD04 → stornata rinviata a 5C (Slice 5A, 2026-06-08)
+- [x] Generazione XML FatturaPA v1.2 (TD01) + download on-demand + fail-fast cedente (Slice 5B, 2026-06-08). TD04/NC → 5C.
 - [ ] PDF (jspdf) — porta layout minimalista
-- [ ] Validators server-side (regime/ritenuta, IPA, prefisso paese UE, ecc.)
+- [x] Validators server-side XML (regime/ritenuta, cliente IT, IPA PA, estero) al boundary di generazione (Slice 5B, 2026-06-08)
 - [ ] Import XML (nuove + legacy)
 
 ### Fase 6 — Scadenziario + Pagamenti

@@ -1,5 +1,5 @@
 // src/client/lib/fatture-api.ts
-import { api } from './api';
+import { api, ApiError } from './api';
 import type { FatturaPublic, FatturaCreateInput, FatturaUpdateInput } from '@shared/types';
 
 export function listFatture(stato?: string): Promise<FatturaPublic[]> {
@@ -33,4 +33,34 @@ export function pagaFattura(id: string, date?: string): Promise<FatturaPublic> {
 
 export function annullaPagamento(id: string): Promise<FatturaPublic> {
   return api.post<FatturaPublic>(`/api/fatture/${id}/annulla-pagamento`, {});
+}
+
+/** Scarica l'XML FatturaPA della fattura. Su errore lancia ApiError col messaggio del server. */
+export async function downloadFatturaXml(id: string): Promise<void> {
+  const res = await fetch(`/api/fatture/${id}/xml`, { credentials: 'include' });
+  if (!res.ok) {
+    let code = 'HTTP_ERROR';
+    let message = `HTTP ${res.status}`;
+    let details: unknown;
+    try {
+      const env = await res.json() as { error?: { code?: string; message?: string; details?: unknown } };
+      code = env.error?.code ?? code;
+      message = env.error?.message ?? message;
+      details = env.error?.details;
+    } catch { /* corpo non-JSON */ }
+    const detailMsg = Array.isArray(details) && details.length ? `: ${(details as string[]).join('; ')}` : '';
+    throw new ApiError(res.status, code, message + detailMsg, details);
+  }
+  const blob = await res.blob();
+  const cd = res.headers.get('content-disposition') || '';
+  const m = cd.match(/filename="([^"]+)"/);
+  const filename = m ? m[1]! : `fattura-${id}.xml`;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
