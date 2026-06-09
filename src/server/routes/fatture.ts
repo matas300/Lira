@@ -12,7 +12,8 @@ import { Hono } from 'hono';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { FatturaCreateInput, FatturaUpdateInput } from '@shared/schemas';
+import { FatturaCreateInput, FatturaUpdateInput, NotaCreditoCreateInput } from '@shared/schemas';
+import { isNCDateValid } from '@shared/nc-sync';
 import {
   computeImporto, isBolloDovuto,
   validateRitenutaForfettario, validateClienteSnapshot,
@@ -318,6 +319,52 @@ fattureRoute.post('/:id/annulla-pagamento', async (c) => {
     updatedAt: new Date().toISOString(),
   }).where(and(eq(fatture.id, id), eq(fatture.profileId, profileId)));
 
+  const [row] = await db.select().from(fatture).where(eq(fatture.id, id)).limit(1);
+  return c.json(toPublic(row!));
+});
+
+// ─────────── POST /:id/nota-credito ───────────
+fattureRoute.post('/:id/nota-credito', zJson(NotaCreditoCreateInput), async (c) => {
+  const db = c.get('db');
+  const profileId = c.get('activeProfileId');
+  const origId = c.req.param('id');
+  const body = c.req.valid('json') as z.infer<typeof NotaCreditoCreateInput>;
+
+  const [orig] = await db.select().from(fatture)
+    .where(and(eq(fatture.id, origId), eq(fatture.profileId, profileId))).limit(1);
+  if (!orig) throw new HttpError(404, 'FATTURA_NOT_FOUND', `Fattura ${origId} non trovata`);
+  if (orig.stato === 'bozza' || !orig.numeroDisplay) {
+    throw new HttpError(409, 'NC_ORIGINALE_NON_NUMERATA', 'La fattura originale dev\'essere inviata (numerata)');
+  }
+  if (orig.stato === 'stornata') {
+    throw new HttpError(409, 'NC_ORIGINALE_STORNATA', 'La fattura è già stornata');
+  }
+  if (!isNCDateValid(body.data, orig.data)) {
+    throw new HttpError(422, 'NC_DATA_ANTERIORE', `La data NC (${body.data}) non può precedere l'originale (${orig.data})`);
+  }
+
+  const id = randomUUID();
+  const values: FatturaInsert = {
+    id, profileId,
+    clienteId: orig.clienteId,
+    tipoDocumento: 'TD04',
+    annoProgressivo: annoFromData(body.data),
+    progressivo: null,
+    numeroDisplay: null,
+    data: body.data,
+    clienteSnapshot: orig.clienteSnapshot,
+    righe: JSON.stringify(body.righe),
+    importo: computeImporto(body.righe),
+    ritenuta: 0,
+    contributoIntegrativo: 0,
+    marcaDaBollo: 0,
+    bolloAddebitato: 0,
+    stato: 'bozza',
+    fatturaOriginaleId: origId,
+    origine: 'manuale',
+    note: body.note ?? null,
+  };
+  await db.insert(fatture).values(values);
   const [row] = await db.select().from(fatture).where(eq(fatture.id, id)).limit(1);
   return c.json(toPublic(row!));
 });
