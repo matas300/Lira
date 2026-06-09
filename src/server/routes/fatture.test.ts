@@ -461,12 +461,13 @@ test('POST /import-xml — re-import stesso file → tutto saltato (dedup)', asy
   assert.match(rep.saltate[0].motivo, /duplicat/i);
 });
 
-test('POST /import-xml — collisione progressivo (numero diverso) → saltata', async () => {
+test('POST /import-xml — collisione progressivo (fattura diversa, stesso progressivo) → saltata', async () => {
   const { app, headers } = await makeApp();
   await app.request('/api/fatture/import-xml', { method: 'POST', headers: J(headers), body: JSON.stringify({ items: [importItem()] }) });
+  // fattura DIVERSA (numeroDisplay diverso) ma stesso (anno, progressivo)
   const r = await app.request('/api/fatture/import-xml', {
     method: 'POST', headers: J(headers),
-    body: JSON.stringify({ items: [importItem({ numero: 'ALT-1' })] }),
+    body: JSON.stringify({ items: [importItem({ numero: 'ALT-1', numeroDisplay: '2026/1-ALT' })] }),
   });
   const rep = (await r.json()) as any;
   assert.equal(rep.importate, 0);
@@ -483,4 +484,25 @@ test('POST /import-xml — TD04 importata senza storno', async () => {
   assert.equal(rep.importate, 1);
   const list = await (await app.request('/api/fatture?stato=inviata', { headers })).json() as any[];
   assert.ok(list.some((f) => f.tipoDocumento === 'TD04'));
+});
+
+test('POST /import-xml — importo ricalcolato dal server (anti-falsificazione)', async () => {
+  const { app, headers } = await makeApp();
+  const r = await app.request('/api/fatture/import-xml', {
+    method: 'POST', headers: J(headers),
+    body: JSON.stringify({ items: [importItem({ importo: 99999 })] }), // righe: 1×1000
+  });
+  assert.equal(((await r.json()) as any).importate, 1);
+  const list = await (await app.request('/api/fatture', { headers })).json() as any[];
+  assert.equal(list[0]!.importo, 1000); // ricalcolato da righe, non 99999
+});
+
+test('POST /import-xml — dedup per numeroDisplay (re-import formato N/AAAA → duplicato)', async () => {
+  const { app, headers } = await makeApp();
+  const it = importItem({ numero: '3/2026', numeroDisplay: '2026/3', progressivo: 3 });
+  await app.request('/api/fatture/import-xml', { method: 'POST', headers: J(headers), body: JSON.stringify({ items: [it] }) });
+  const r2 = await app.request('/api/fatture/import-xml', { method: 'POST', headers: J(headers), body: JSON.stringify({ items: [it] }) });
+  const rep = (await r2.json()) as any;
+  assert.equal(rep.importate, 0);
+  assert.match(rep.saltate[0].motivo, /duplicat/i);
 });

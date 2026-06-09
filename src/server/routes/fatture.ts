@@ -421,7 +421,9 @@ fattureRoute.post('/import-xml', zJson(ImportXmlBody), async (c) => {
   const report = { importate: 0, clientiCreati: 0, saltate: [] as Array<{ numero: string; motivo: string }> };
 
   for (const item of items) {
-    const dk = dedupKey({ tipoDocumento: item.tipoDocumento, annoProgressivo: item.annoProgressivo, progressivo: item.progressivo, numero: item.numero });
+    // dedupKey usa numeroDisplay (ciò che è in DB sulle fatture esistenti),
+    // non il numero raw: per i formati 'N/AAAA' i due divergono.
+    const dk = dedupKey({ tipoDocumento: item.tipoDocumento, annoProgressivo: item.annoProgressivo, progressivo: item.progressivo, numero: item.numeroDisplay });
     if (seenDedup.has(dk)) { report.saltate.push({ numero: item.numero, motivo: 'duplicato' }); continue; }
     const progKey = `${item.annoProgressivo}|${item.progressivo}`;
     if (item.progressivo > 0 && seenProg.has(progKey)) {
@@ -454,7 +456,7 @@ fattureRoute.post('/import-xml', zJson(ImportXmlBody), async (c) => {
       data: item.data,
       clienteSnapshot: JSON.stringify(item.clienteSnapshot),
       righe: JSON.stringify(item.righe),
-      importo: item.importo,
+      importo: computeImporto(item.righe), // ricalcolato server-side (no trust sul client)
       ritenuta: 0,
       contributoIntegrativo: 0,
       marcaDaBollo: item.marcaDaBollo ? 1 : 0,
