@@ -351,3 +351,31 @@ test('POST /:id/nota-credito — data NC anteriore → 422 NC_DATA_ANTERIORE', a
   assert.equal(r.status, 422);
   assert.equal(((await r.json()) as any).error.code, 'NC_DATA_ANTERIORE');
 });
+
+async function creaEInviaNC(app: any, headers: any, origId: string, prezzo: number, data = '2026-04-01') {
+  const nc = await (await app.request(`/api/fatture/${origId}/nota-credito`, {
+    method: 'POST', headers: J(headers), body: JSON.stringify({ data, righe: [{ descrizione: 'Storno', prezzoUnitario: prezzo }] }),
+  })).json() as any;
+  await app.request(`/api/fatture/${nc.id}/invia`, { method: 'POST', headers });
+  return nc;
+}
+
+test('invia NC totale → originale stornata', async () => {
+  const { app, db, headers, profileId } = await makeApp();
+  await setCedente(db, profileId);
+  const cId = await clienteCompleto(db, profileId);
+  const orig = await inviaOriginale(app, headers, cId); // importo 1000
+  await creaEInviaNC(app, headers, orig.id, 1000);
+  const origAfter = await (await app.request(`/api/fatture/${orig.id}`, { headers })).json() as any;
+  assert.equal(origAfter.stato, 'stornata');
+});
+
+test('invia NC parziale → originale resta inviata', async () => {
+  const { app, db, headers, profileId } = await makeApp();
+  await setCedente(db, profileId);
+  const cId = await clienteCompleto(db, profileId);
+  const orig = await inviaOriginale(app, headers, cId); // 1000
+  await creaEInviaNC(app, headers, orig.id, 300);
+  const origAfter = await (await app.request(`/api/fatture/${orig.id}`, { headers })).json() as any;
+  assert.equal(origAfter.stato, 'inviata');
+});

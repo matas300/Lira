@@ -13,7 +13,7 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { FatturaCreateInput, FatturaUpdateInput, NotaCreditoCreateInput } from '@shared/schemas';
-import { isNCDateValid } from '@shared/nc-sync';
+import { isNCDateValid, computeStorno } from '@shared/nc-sync';
 import {
   computeImporto, isBolloDovuto,
   validateRitenutaForfettario, validateClienteSnapshot,
@@ -271,6 +271,34 @@ fattureRoute.post('/:id/invia', async (c) => {
   if (updated.length === 0) {
     // Richiesta concorrente (o doppio click) ha già inviato la fattura.
     throw new HttpError(409, 'FATTURA_NOT_INVIABILE', 'Fattura già inviata o non più in bozza');
+  }
+
+  // Side-effect NC TD04: applica lo storno all'originale (idempotente).
+  if (f.tipoDocumento === 'TD04' && f.fatturaOriginaleId) {
+    await db.transaction(async (tx) => {
+      const [orig] = await tx.select().from(fatture)
+        .where(and(eq(fatture.id, f.fatturaOriginaleId!), eq(fatture.profileId, profileId))).limit(1);
+      if (!orig) return; // originale cancellato (FK set null): niente storno
+      const res = computeStorno({
+        originaleImporto: orig.importo,
+        originaleStato: orig.stato,
+        originaleNcIds: parseJson<string[]>(orig.ncIds, []),
+        originaleNcTotaleImporto: orig.ncTotaleImporto,
+        ncId: f.id,
+        ncImporto: f.importo,
+      });
+      const nowIso = new Date().toISOString();
+      if (res.applied) {
+        await tx.update(fatture).set({
+          ncIds: JSON.stringify(res.ncIds),
+          ncTotaleImporto: res.ncTotaleImporto,
+          stato: res.stato,
+          updatedAt: nowIso,
+        }).where(and(eq(fatture.id, orig.id), eq(fatture.profileId, profileId)));
+      }
+      await tx.update(fatture).set({ tipoStorno: res.tipoStorno, updatedAt: nowIso })
+        .where(and(eq(fatture.id, f.id), eq(fatture.profileId, profileId)));
+    });
   }
 
   const [row] = await db.select().from(fatture).where(eq(fatture.id, id)).limit(1);
