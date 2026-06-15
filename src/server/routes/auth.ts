@@ -1,14 +1,15 @@
 // src/server/routes/auth.ts
 import { Hono } from 'hono';
 import { setCookie, deleteCookie, getCookie } from 'hono/cookie';
-import { zValidator } from '@hono/zod-validator';
 import { eq } from 'drizzle-orm';
+import type { Context } from 'hono';
 import { LoginInput } from '@shared/schemas';
 import { findUserByEmail, listProfilesForUser } from '../lib/users';
 import { hashPassword, verifyPassword } from '../lib/password';
-import { createSession, deleteSession, SESSION_TTL_MS } from '../lib/session';
-import { requireSession, SESSION_COOKIE, type AuthEnv } from '../middleware/auth';
+import { createSession, deleteSession, deleteExpiredSessions } from '../lib/session';
+import { requireSession, sessionCookieOptions, SESSION_COOKIE, type AuthEnv } from '../middleware/auth';
 import { HttpError } from '../middleware/error';
+import { zJson } from '../middleware/validate';
 import { users } from '../db/schema';
 import type { Db } from '../db/client';
 
@@ -21,14 +22,62 @@ async function getDummyHash(): Promise<string> {
   return dummyHash;
 }
 
-function cookieOptions() {
-  return {
-    httpOnly: true,
-    sameSite: 'Lax' as const,
-    secure: process.env.NODE_ENV === 'production',
-    path: '/',
-    maxAge: SESSION_TTL_MS / 1000,
-  };
+// ── Rate limit login per IP (in-memory) ─────────────────────────────────────
+// Max 10 tentativi FALLITI per IP in una finestra di 15 minuti → 429. Il login
+// riuscito resetta il contatore. In-process e in-memory: una sola istanza Fly,
+// 3 utenti — niente store esterno. Pulizia lazy: le entry scadute vengono
+// rimosse quando incontrate, più sweep completo quando la mappa cresce.
+const LOGIN_MAX_FAILURES = 10;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_MAP_SWEEP_THRESHOLD = 1000;
+
+type FailureEntry = { count: number; firstFailAt: number };
+const loginFailures = new Map<string, FailureEntry>();
+
+function clientIp(c: Context): string {
+  // Dietro il proxy Fly: Fly-Client-IP è l'IP reale del client. Fallback su
+  // X-Forwarded-For (primo hop) e su una chiave fissa in dev/test.
+  return (
+    c.req.header('fly-client-ip') ??
+    c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ??
+    'local'
+  );
+}
+
+function assertNotRateLimited(ip: string): void {
+  const entry = loginFailures.get(ip);
+  if (!entry) return;
+  if (Date.now() - entry.firstFailAt >= LOGIN_WINDOW_MS) {
+    loginFailures.delete(ip); // finestra scaduta → pulizia lazy
+    return;
+  }
+  if (entry.count >= LOGIN_MAX_FAILURES) {
+    throw new HttpError(429, 'RATE_LIMITED', 'Troppi tentativi di login. Riprova tra qualche minuto.');
+  }
+}
+
+function recordLoginFailure(ip: string): void {
+  const now = Date.now();
+  const entry = loginFailures.get(ip);
+  if (!entry || now - entry.firstFailAt >= LOGIN_WINDOW_MS) {
+    loginFailures.set(ip, { count: 1, firstFailAt: now });
+  } else {
+    entry.count += 1;
+  }
+  if (loginFailures.size > LOGIN_MAP_SWEEP_THRESHOLD) {
+    for (const [key, e] of loginFailures) {
+      if (now - e.firstFailAt >= LOGIN_WINDOW_MS) loginFailures.delete(key);
+    }
+  }
+}
+
+function recordLoginSuccess(ip: string): void {
+  loginFailures.delete(ip);
+}
+
+// Solo per i test: stato in-memory condiviso tra i casi.
+export function resetLoginRateLimiter(): void {
+  loginFailures.clear();
 }
 
 async function mePayload(db: Db, userId: string, activeProfileId: string) {
@@ -60,7 +109,10 @@ async function mePayload(db: Db, userId: string, activeProfileId: string) {
   };
 }
 
-authRoute.post('/login', zValidator('json', LoginInput), async (c) => {
+authRoute.post('/login', zJson(LoginInput), async (c) => {
+  const ip = clientIp(c);
+  assertNotRateLimited(ip); // prima di ogni verify: niente Argon2 per IP bloccati
+
   const { email, password } = c.req.valid('json');
   const db = c.get('db');
   const user = await findUserByEmail(db, email);
@@ -68,16 +120,25 @@ authRoute.post('/login', zValidator('json', LoginInput), async (c) => {
   if (!user) {
     // verify dummy per uguagliare timing rispetto al caso "user esistente con password sbagliata"
     await verifyPassword(await getDummyHash(), password);
+    recordLoginFailure(ip);
     throw new HttpError(401, 'INVALID_CREDENTIALS', 'Email o password non validi');
   }
   const ok = await verifyPassword(user.passwordHash, password);
-  if (!ok) throw new HttpError(401, 'INVALID_CREDENTIALS', 'Email o password non validi');
+  if (!ok) {
+    recordLoginFailure(ip);
+    throw new HttpError(401, 'INVALID_CREDENTIALS', 'Email o password non validi');
+  }
+  recordLoginSuccess(ip);
+
+  // Housekeeping: rimuove le sessioni scadute di tutti gli utenti. Await
+  // deliberato (vedi deleteExpiredSessions): login raro, errori visibili.
+  await deleteExpiredSessions(db);
 
   const profs = await listProfilesForUser(db, user.id);
   if (profs.length === 0) throw new HttpError(500, 'NO_PROFILE', 'User has no profile');
   const first = profs[0]!;
   const session = await createSession(db, user.id, first.id);
-  setCookie(c, SESSION_COOKIE, session.id, cookieOptions());
+  setCookie(c, SESSION_COOKIE, session.id, sessionCookieOptions());
 
   return c.json(await mePayload(db, user.id, session.activeProfileId));
 });

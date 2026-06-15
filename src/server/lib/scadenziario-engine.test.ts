@@ -25,10 +25,16 @@ function makeScenario(over: Partial<ForfettarioScenario> = {}): ForfettarioScena
     substituteTax: 4350,
     taxSaldo: 4350,
     taxAccontoBase: 4350,
-    taxAcconti: { base: 4350, total: 4350, first: 1740, second: 2610, mode: 'double' },
+    taxAcconti: { base: 4350, total: 4350, first: 2175, second: 2175, mode: 'double' },
+    contributiVariabiliDovuti: 1000,
     contributionSaldo: 1000,
     contributionAccontoBase: 0,
     contributionAcconti: { base: 0, total: 0, first: 0, second: 0, mode: 'none' },
+    forecastGrossCollected: 50_000,
+    forecastGrossIncome: 33_500,
+    forecastContributiVariabili: 1000,
+    forecastTaxableBase: 29_000,
+    forecastSubstituteTax: 4350,
     previousFixedTail: 1100,
     currentFixedWithinYear: 3300,
     previousContributionSaldo: 0,
@@ -150,21 +156,27 @@ test('FIX C3: bollo_q4 (28/02/N+1) passa attraverso buildRolledDueDate', () => {
   assert.equal(bolloQ4!.dueDateRolled, true);
 });
 
-test('riduzione_35=1 → inps_fissi_1 rata fissa × 0.65 (year=2025, INPS params noti)', () => {
+test('riduzione_35=1 → inps_fissi_1 rata fissa × 0.65 arrotondata a 2 decimali (FP-safe)', () => {
   // Usa year=2025 perché INPS_ARTCOM[2025] è popolata; 2026 non ancora.
   const ys = baseYearSettings();
   ys.riduzione_35 = 1;
   const out = buildScadenziario(baseInput({ year: 2025, yearSettings: ys }));
   const fissi1 = out.rows.find((r) => r.id === 'inps_fissi_1_2025');
   assert.ok(fissi1, 'riga inps_fissi_1_2025 deve esistere');
+  // 4460.64 × 0.65 / 4 = 724.854 → ceil2 = 724.86 (fix audit: niente importi
+  // a 3 decimali nel calendario — non sono versabili in F24).
+  assert.equal(fissi1!.amount.point, 724.86);
+});
+
+test('rata fissa senza riduzione resta l\'importo F24 esatto (1115.16, fix ceil2 FP-safe)', () => {
+  const out = buildScadenziario(baseInput({ year: 2025 }));
   const inps = getInpsArtComForYear(2025);
-  const rataPiena = inps.quotaFissaAnnuaArtigiano / 4;
-  const rataRidotta = rataPiena * 0.65;
-  // Tolleranza 1 centesimo per arrotondamenti ceil2 interni.
-  assert.ok(
-    Math.abs(fissi1!.amount.point - rataRidotta) < 0.02,
-    `attesa rata ridotta ~${rataRidotta.toFixed(2)}, ottenuta ${fissi1!.amount.point}`,
-  );
+  assert.equal(inps.quotaFissaAnnuaArtigiano, 4460.64);
+  for (let i = 1; i <= 4; i++) {
+    const fissi = out.rows.find((r) => r.id === `inps_fissi_${i}_2025`);
+    assert.ok(fissi, `inps_fissi_${i}_2025 deve esistere`);
+    assert.equal(fissi!.amount.point, 1115.16, `rata ${i} deve essere 1115.16`);
+  }
 });
 
 test('inpsMode=gestione_separata → rate fisse a 0 (no minimale in GS)', () => {

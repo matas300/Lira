@@ -1,23 +1,17 @@
 // src/client/pages/fatture.ts
-import { getMe } from '../lib/auth';
-import { ApiError } from '../lib/api';
-import { renderHeader, wireHeader } from '../components/header';
-import { renderBottomNav } from '../components/bottom-nav';
-import { openModal } from '../components/modal';
+import { api, ApiError } from '../lib/api';
+import { esc, mountPage } from '../lib/dom';
+import { openModal, confirmModal, alertModal, promptDateModal } from '../components/modal';
 import { listClienti } from '../lib/clienti-api';
 import {
   listFatture, createFattura, updateFattura, removeFattura,
-  inviaFattura, pagaFattura, downloadFatturaXml, createNotaCredito, importXmlFatture,
+  inviaFattura, pagaFattura, downloadFatturaXml, openFatturaPdf, createNotaCredito, importXmlFatture,
 } from '../lib/fatture-api';
 import { parseFatturaXml, ImportParseError } from '../lib/parse-fattura-xml';
 import { buildImportItem } from '@shared/import-fattura';
-import type { FatturaPublic, ClientePublic, Riga, ImportFatturaInput } from '@shared/types';
+import type { FatturaPublic, ClientePublic, Riga, ImportFatturaInput, ImportReport } from '@shared/types';
 
-function esc(v: unknown): string {
-  return String(v ?? '').replace(/[&<>"']/g, (ch) => (
-    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]!
-  ));
-}
+const LIMITE_FORFETTARIO_FALLBACK = 85000;
 
 function eur(n: number): string {
   return '€' + (Number(n) || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -35,11 +29,49 @@ const FILTERS: Array<{ key: string; label: string; match: (f: FatturaPublic) => 
   { key: 'bozze', label: 'Bozze', match: (f) => f.stato === 'bozza' },
 ];
 
+// ── Report import XML ──
+// Il render è tollerante a campi extra (warning/errori per-item in arrivo da
+// uno slice parallelo): le liste sconosciute vengono formattate genericamente.
+function fmtReportItem(it: unknown): string {
+  if (typeof it === 'string') return esc(it);
+  if (it && typeof it === 'object') {
+    const o = it as Record<string, unknown>;
+    const num = o.numero ?? o.file ?? o.id ?? '';
+    const msg = o.motivo ?? o.messaggio ?? o.message ?? o.warning ?? o.errore ?? '';
+    if (num !== '' || msg !== '') return `${esc(num)}${num !== '' && msg !== '' ? ': ' : ''}${esc(msg)}`;
+    return esc(JSON.stringify(it));
+  }
+  return esc(String(it));
+}
+
+function reportListHtml(label: string, items: unknown[], cls: string): string {
+  if (!items.length) return '';
+  return `
+    <p style="margin-top:var(--space-3);font-weight:600;">${esc(label)}</p>
+    <ul>${items.map((it) => `<li class="${cls}">• ${fmtReportItem(it)}</li>`).join('')}</ul>`;
+}
+
+function importReportHtml(rep: ImportReport, erroriParse: string[]): string {
+  const extra = rep as unknown as Record<string, unknown>;
+  const warnings = Array.isArray(extra.warnings) ? extra.warnings : [];
+  const errori = Array.isArray(extra.errori) ? extra.errori : [];
+  return `
+    <div class="import-report">
+      <p>Importate: <strong>${Number(rep.importate) || 0}</strong>
+         · Clienti creati: <strong>${Number(rep.clientiCreati) || 0}</strong>
+         · Saltate: <strong>${Array.isArray(rep.saltate) ? rep.saltate.length : 0}</strong></p>
+      ${reportListHtml('Saltate', Array.isArray(rep.saltate) ? rep.saltate : [], 'warn')}
+      ${reportListHtml('Warning', warnings, 'warn')}
+      ${reportListHtml('Errori', errori, 'err')}
+      ${reportListHtml('File non parsati', erroriParse, 'err')}
+    </div>`;
+}
+
 export function mount(container: HTMLElement): () => void {
-  let cleanupHeader: (() => void) | null = null;
   let fatture: FatturaPublic[] = [];
   let clienti: ClientePublic[] = [];
   let filterKey = 'tutte';
+  let limiteForfettario = LIMITE_FORFETTARIO_FALLBACK;
   // Handle del modal aperto: chiuso se l'utente naviga via (no backdrop/listener orfani).
   let activeModalClose: (() => void) | null = null;
 
@@ -48,38 +80,53 @@ export function mount(container: HTMLElement): () => void {
     return fatture.filter(f.match);
   }
 
+  // Fatturato anno corrente per la barra: TD01 non bozza/stornata, al netto
+  // degli storni parziali (importo − ncTotaleImporto). Le NC (TD04) non
+  // contano come fatturato proprio.
   function fatturatoAnnoCorrente(): number {
     const y = new Date().getUTCFullYear();
     return fatture
-      .filter((f) => f.stato !== 'bozza' && f.annoProgressivo === y && f.tipoDocumento !== 'TD04')
-      .reduce((s, f) => s + (f.importo || 0), 0);
+      .filter((f) =>
+        f.stato !== 'bozza' && f.stato !== 'stornata'
+        && f.annoProgressivo === y && f.tipoDocumento !== 'TD04')
+      .reduce((s, f) => s + Math.max(0, (f.importo || 0) - (f.ncTotaleImporto || 0)), 0);
+  }
+
+  function badgeHtml(f: FatturaPublic): string {
+    return `<span class="badge-stato ${esc(f.stato)}">${esc(f.stato.toUpperCase())}</span>`;
   }
 
   function rowHtml(f: FatturaPublic): string {
     const num = f.numeroDisplay ?? '—';
-    const stato = f.stato.toUpperCase();
+    const isNc = f.tipoDocumento === 'TD04';
+    // PDF disponibile su OGNI stato, bozza inclusa (preview watermarkata, 5D).
+    const pdfBtn = `<button class="btn btn-ghost" data-pdf="${esc(f.id)}" title="Apri PDF">PDF</button>`;
     const xmlBtn = f.stato !== 'bozza'
       ? `<button class="btn btn-ghost" data-xml="${esc(f.id)}" title="Scarica XML">XML</button>`
       : '';
     const ncBtn = (f.tipoDocumento === 'TD01' && (f.stato === 'inviata' || f.stato === 'pagata'))
       ? `<button class="btn btn-ghost" data-nc="${esc(f.id)}" title="Crea nota di credito">NC</button>`
       : '';
+    // Le NC (TD04) non sono "pagabili": niente bottone € (il server lo rifiuta comunque).
+    const pagaBtn = (!isNc && f.stato === 'inviata')
+      ? `<button class="btn btn-ghost" data-paga="${esc(f.id)}" title="Segna pagata">€</button>`
+      : '';
     const azioni = f.stato === 'bozza'
-      ? `<button class="btn btn-ghost" data-invia="${esc(f.id)}" title="Segna inviata">✉</button>
-         <button class="btn btn-ghost" data-del="${esc(f.id)}" title="Elimina" style="color:var(--red);">✕</button>`
-      : f.stato === 'inviata'
-        ? `${xmlBtn}${ncBtn}<button class="btn btn-ghost" data-paga="${esc(f.id)}" title="Segna pagata">€</button>`
-        : `${xmlBtn}${ncBtn}`;
+      ? `${pdfBtn}
+         <button class="btn btn-ghost" data-invia="${esc(f.id)}" title="Segna inviata">✉</button>
+         <button class="btn btn-danger" data-del="${esc(f.id)}" title="Elimina">✕</button>`
+      : `${pdfBtn}${xmlBtn}${ncBtn}${pagaBtn}`;
+    const stornoInfo = f.ncTotaleImporto > 0 && f.stato !== 'stornata'
+      ? `<span style="color:var(--color-text-muted);font-size:.78rem;"> · stornato ${eur(f.ncTotaleImporto)}</span>`
+      : '';
     return `
-      <li data-id="${esc(f.id)}" class="fattura-row"
-          style="display:grid;grid-template-columns:80px 1fr 90px 90px auto;gap:var(--space-2);align-items:center;
-                 padding:var(--space-3);background:var(--bg);border-radius:var(--radius-md);">
-        <span class="fattura-open" style="cursor:pointer;font-variant-numeric:tabular-nums;">${esc(num)}</span>
+      <li data-id="${esc(f.id)}" class="fattura-row">
+        <span class="numero fattura-open">${esc(num)}</span>
         <span class="fattura-open" style="cursor:pointer;"><strong>${esc(clienteNome(f))}</strong>
-          <span style="color:var(--text-muted);"> ${esc(f.dataInvioSdi ?? f.data)}</span></span>
-        <span style="text-align:right;">${eur(f.importo)}</span>
-        <span style="color:var(--text-muted);">${f.tipoDocumento === 'TD04' ? 'NC ' : ''}${esc(stato)}${f.ncTotaleImporto > 0 && f.stato !== 'stornata' ? ` · stornato ${eur(f.ncTotaleImporto)}` : ''}</span>
-        <span style="display:flex;gap:var(--space-1);justify-content:flex-end;">${azioni}</span>
+          <span style="color:var(--color-text-muted);"> ${esc(f.dataInvioSdi ?? f.data)}</span></span>
+        <span class="importo">${eur(f.importo)}</span>
+        <span>${isNc ? '<span style="color:var(--color-text-muted);font-size:.78rem;">NC </span>' : ''}${badgeHtml(f)}${stornoInfo}</span>
+        <span class="azioni">${azioni}</span>
       </li>`;
   }
 
@@ -92,7 +139,7 @@ export function mount(container: HTMLElement): () => void {
           <input class="input" type="number" step="0.01" data-riga-qta value="${esc(r?.quantita ?? 1)}" /></div>
         <div class="form-row" style="flex:0 0 110px;"><label>Prezzo</label>
           <input class="input" type="number" step="0.01" data-riga-prezzo value="${esc(r?.prezzoUnitario ?? '')}" /></div>
-        <button type="button" class="btn btn-ghost" data-riga-del style="color:var(--red);">✕</button>
+        <button type="button" class="btn btn-danger" data-riga-del title="Rimuovi riga">✕</button>
       </div>`;
   }
 
@@ -105,7 +152,7 @@ export function mount(container: HTMLElement): () => void {
     const locked = !!f && f.stato !== 'bozza';
     return `
       <form data-form style="display:flex;flex-direction:column;gap:var(--space-3);">
-        ${locked ? `<p style="color:var(--text-muted);">Fattura ${esc(f!.numeroDisplay ?? '')} ${esc(f!.stato)} — solo note modificabili.</p>` : ''}
+        ${locked ? `<p style="color:var(--color-text-muted);">Fattura ${esc(f!.numeroDisplay ?? '')} ${esc(f!.stato)} — solo note modificabili.</p>` : ''}
         <div class="form-row"><label>Cliente *</label>
           <select class="input" data-cliente ${locked ? 'disabled' : ''}>${opts}</select></div>
         <div class="form-row"><label>Data *</label>
@@ -118,7 +165,7 @@ export function mount(container: HTMLElement): () => void {
         <p class="form-error" data-error hidden></p>
         <div style="display:flex;gap:var(--space-2);justify-content:space-between;">
           <button type="submit" class="btn btn-primary">Salva</button>
-          ${f && f.stato === 'bozza' ? `<button type="button" class="btn btn-ghost" data-delete style="color:var(--red);">Elimina</button>` : ''}
+          ${f && f.stato === 'bozza' ? `<button type="button" class="btn btn-danger" data-delete>Elimina</button>` : ''}
         </div>
       </form>`;
   }
@@ -161,7 +208,11 @@ export function mount(container: HTMLElement): () => void {
         recalcTotale(root);
 
         root.querySelector<HTMLButtonElement>('[data-delete]')?.addEventListener('click', async () => {
-          if (!existing || !confirm('Eliminare questa bozza?')) return;
+          if (!existing) return;
+          const ok = await confirmModal('Eliminare questa bozza?', {
+            title: 'Elimina bozza', confirmLabel: 'Elimina', danger: true,
+          });
+          if (!ok) return;
           await removeFattura(existing.id); close(); await refresh();
         });
 
@@ -194,13 +245,16 @@ export function mount(container: HTMLElement): () => void {
 
   function openNotaCreditoModal(orig: FatturaPublic): void {
     const righeInit = orig.righe.length ? orig.righe : [{ descrizione: '', quantita: 1, prezzoUnitario: 0 }];
+    // La data della NC è precompilata con OGGI (la data della fattura
+    // originale invitava alla retrodatazione).
+    const oggi = new Date().toISOString().slice(0, 10);
     const handle = openModal({
       title: `Nota di credito su ${orig.numeroDisplay ?? ''}`,
       bodyHtml: `
         <form data-form style="display:flex;flex-direction:column;gap:var(--space-3);">
-          <p style="color:var(--text-muted);">Storno di ${esc(orig.numeroDisplay ?? '')} — ${esc(clienteNome(orig))}. Riduci gli importi per uno storno parziale.</p>
+          <p style="color:var(--color-text-muted);">Storno di ${esc(orig.numeroDisplay ?? '')} — ${esc(clienteNome(orig))}. Riduci gli importi per uno storno parziale.</p>
           <div class="form-row"><label>Data *</label>
-            <input class="input" type="date" data-data value="${esc(orig.data)}" /></div>
+            <input class="input" type="date" data-data value="${esc(oggi)}" /></div>
           <div><label>Righe</label>
             <div data-righe style="display:flex;flex-direction:column;gap:var(--space-2);">${righeInit.map((r) => rigaInputs(r)).join('')}</div></div>
           <div style="text-align:right;font-weight:600;">Totale storno: <span data-totale>—</span></div>
@@ -237,7 +291,7 @@ export function mount(container: HTMLElement): () => void {
     const rows = visible();
     ul.innerHTML = rows.length
       ? rows.map(rowHtml).join('')
-      : `<li style="color:var(--text-muted);padding:var(--space-3);">Nessuna fattura.</li>`;
+      : `<li class="table-empty">Nessuna fattura.</li>`;
     ul.querySelectorAll<HTMLElement>('.fattura-open').forEach((el) => {
       el.addEventListener('click', () => {
         const li = el.closest<HTMLElement>('.fattura-row')!;
@@ -247,22 +301,29 @@ export function mount(container: HTMLElement): () => void {
     });
     ul.querySelectorAll<HTMLButtonElement>('[data-invia]').forEach((b) => b.addEventListener('click', async () => {
       try { await inviaFattura(b.dataset.invia!); await refresh(); }
-      catch (err) { alert(err instanceof ApiError ? err.message : 'Errore invio'); }
+      catch (err) { await alertModal('Errore invio', `<p>${esc(err instanceof ApiError ? err.message : 'Errore invio')}</p>`); }
     }));
     ul.querySelectorAll<HTMLButtonElement>('[data-paga]').forEach((b) => b.addEventListener('click', async () => {
-      const d = prompt('Data incasso (YYYY-MM-DD):', new Date().toISOString().slice(0, 10));
+      const d = await promptDateModal('Segna pagata', 'Data incasso', new Date().toISOString().slice(0, 10));
       if (!d) return;
       try { await pagaFattura(b.dataset.paga!, d); await refresh(); }
-      catch (err) { alert(err instanceof ApiError ? err.message : 'Errore'); }
+      catch (err) { await alertModal('Errore', `<p>${esc(err instanceof ApiError ? err.message : 'Errore')}</p>`); }
     }));
     ul.querySelectorAll<HTMLButtonElement>('[data-del]').forEach((b) => b.addEventListener('click', async () => {
-      if (!confirm('Eliminare questa bozza?')) return;
+      const ok = await confirmModal('Eliminare questa bozza?', {
+        title: 'Elimina bozza', confirmLabel: 'Elimina', danger: true,
+      });
+      if (!ok) return;
       try { await removeFattura(b.dataset.del!); await refresh(); }
-      catch (err) { alert(err instanceof ApiError ? err.message : 'Errore'); }
+      catch (err) { await alertModal('Errore', `<p>${esc(err instanceof ApiError ? err.message : 'Errore')}</p>`); }
     }));
     ul.querySelectorAll<HTMLButtonElement>('[data-xml]').forEach((b) => b.addEventListener('click', async () => {
       try { await downloadFatturaXml(b.dataset.xml!); }
-      catch (err) { alert(err instanceof ApiError ? err.message : 'Errore generazione XML'); }
+      catch (err) { await alertModal('Errore generazione XML', `<p>${esc(err instanceof ApiError ? err.message : 'Errore generazione XML')}</p>`); }
+    }));
+    ul.querySelectorAll<HTMLButtonElement>('[data-pdf]').forEach((b) => b.addEventListener('click', async () => {
+      try { await openFatturaPdf(b.dataset.pdf!); }
+      catch (err) { await alertModal('Errore generazione PDF', `<p>${esc(err instanceof ApiError ? err.message : 'Errore generazione PDF')}</p>`); }
     }));
     ul.querySelectorAll<HTMLButtonElement>('[data-nc]').forEach((b) => b.addEventListener('click', () => {
       const f = fatture.find((x) => x.id === b.dataset.nc);
@@ -271,13 +332,30 @@ export function mount(container: HTMLElement): () => void {
   }
 
   function renderMeta(): void {
-    const bar = container.querySelector<HTMLElement>('[data-fatturato]');
-    if (!bar) return;
+    const box = container.querySelector<HTMLElement>('[data-fatturato]');
+    if (!box) return;
+    const anno = new Date().getUTCFullYear();
     const tot = fatturatoAnnoCorrente();
-    const pct = Math.min(100, Math.round((tot / 85000) * 100));
-    bar.innerHTML = `Fatturato ${new Date().getUTCFullYear()}: ${eur(tot)} / €85.000
-      <div style="height:6px;background:var(--bg);border-radius:4px;margin-top:4px;">
-        <div style="height:100%;width:${pct}%;background:var(--color-primary);border-radius:4px;"></div></div>`;
+    const pct = Math.min(100, Math.round((tot / limiteForfettario) * 100));
+    const fillColor = pct >= 100 ? 'var(--color-error)' : pct >= 80 ? 'var(--color-warning)' : 'var(--color-primary)';
+    box.innerHTML = `
+      <span style="color:var(--color-text-muted);">Fatturato ${anno}: ${eur(tot)} / ${eur(limiteForfettario)}</span>
+      <div class="progress-bar">
+        <div class="progress-fill" style="width:${pct}%;background:${fillColor};"></div>
+        <span class="progress-text">${pct}%</span>
+      </div>`;
+  }
+
+  // Soglia forfettario dai year-settings (fallback 85.000 se assenti).
+  async function loadLimite(): Promise<void> {
+    const anno = new Date().getUTCFullYear();
+    try {
+      const res = await api.get<{ yearSettings: { limiteForfettario?: number | null } }>(`/api/year-settings/${anno}`);
+      const lim = res.yearSettings?.limiteForfettario;
+      if (typeof lim === 'number' && lim > 0) limiteForfettario = lim;
+    } catch {
+      limiteForfettario = LIMITE_FORFETTARIO_FALLBACK;
+    }
   }
 
   async function refresh(): Promise<void> {
@@ -285,81 +363,81 @@ export function mount(container: HTMLElement): () => void {
     renderList(); renderMeta();
   }
 
-  async function render(): Promise<void> {
-    const me = await getMe();
-    if (!me) {
-      history.pushState({}, '', '/login');
-      window.dispatchEvent(new PopStateEvent('popstate'));
-      return;
-    }
-    clienti = await listClienti();
-    const chips = FILTERS.map((f) =>
-      `<button class="btn btn-ghost" data-filter="${f.key}">${f.label}</button>`).join('');
-    container.innerHTML = `
-      <div class="app-shell">
-        ${renderHeader(me, render)}
-        <main class="app-main">
-          <div class="card">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-4);">
-              <h2 style="margin:0;">Fatture</h2>
-              <div style="display:flex;gap:var(--space-2);">
-                <button class="btn btn-ghost" data-import-xml>Importa XML</button>
-                <button class="btn btn-primary" data-new${clienti.length ? '' : ' disabled title="Crea prima un cliente"'}>Nuova</button>
-              </div>
-              <input type="file" accept=".xml,text/xml,application/xml" multiple data-xml-input hidden />
-            </div>
-            <div style="display:flex;gap:var(--space-2);margin-bottom:var(--space-3);">${chips}</div>
-            <div data-fatturato style="margin-bottom:var(--space-4);color:var(--text-muted);"></div>
-            <ul data-list style="list-style:none;display:flex;flex-direction:column;gap:var(--space-2);"></ul>
-          </div>
-        </main>
-        ${renderBottomNav()}
-      </div>`;
-    if (cleanupHeader) cleanupHeader();
-    cleanupHeader = wireHeader(container, render);
-
-    container.querySelector<HTMLButtonElement>('[data-new]')?.addEventListener('click', () => openFatturaModal());
-    container.querySelectorAll<HTMLButtonElement>('[data-filter]').forEach((b) => b.addEventListener('click', () => {
-      filterKey = b.dataset.filter!; renderList();
-    }));
-
-    const fileInput = container.querySelector<HTMLInputElement>('[data-xml-input]');
-    container.querySelector<HTMLButtonElement>('[data-import-xml]')?.addEventListener('click', () => fileInput?.click());
-    fileInput?.addEventListener('change', async () => {
-      const files = Array.from(fileInput.files ?? []);
-      fileInput.value = '';
-      if (!files.length) return;
-      const items: ImportFatturaInput[] = [];
-      const erroriParse: string[] = [];
-      for (const file of files) {
-        try {
-          items.push(buildImportItem(parseFatturaXml(await file.text())));
-        } catch (err) {
-          erroriParse.push(`${file.name}: ${err instanceof ImportParseError ? err.message : 'XML non valido'}`);
-        }
-      }
-      if (!items.length) {
-        alert('Nessun XML valido.\n' + erroriParse.join('\n'));
-        return;
-      }
-      try {
-        const rep = await importXmlFatture(items);
-        const righeSaltate = rep.saltate.map((s) => `• ${s.numero}: ${s.motivo}`).join('\n');
-        alert(`Importate: ${rep.importate}\nClienti creati: ${rep.clientiCreati}\nSaltate: ${rep.saltate.length}`
-          + (righeSaltate ? `\n${righeSaltate}` : '')
-          + (erroriParse.length ? `\nFile non parsati:\n${erroriParse.join('\n')}` : ''));
-        await refresh();
-      } catch (err) {
-        alert(err instanceof ApiError ? err.message : 'Errore import');
-      }
+  function renderChips(): void {
+    container.querySelectorAll<HTMLButtonElement>('[data-filter]').forEach((b) => {
+      b.classList.toggle('active', b.dataset.filter === filterKey);
     });
-
-    await refresh();
   }
 
-  render();
-  return () => {
-    if (cleanupHeader) cleanupHeader();
-    if (activeModalClose) { activeModalClose(); activeModalClose = null; }
-  };
+  return mountPage({
+    container,
+    route: '/fatture',
+    render: async ({ main }) => {
+      clienti = await listClienti();
+      const chips = FILTERS.map((f) =>
+        `<button class="filter-chip${f.key === filterKey ? ' active' : ''}" data-filter="${f.key}">${f.label}</button>`).join('');
+      main.innerHTML = `
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-4);">
+            <h2 style="margin:0;">Fatture</h2>
+            <div style="display:flex;gap:var(--space-2);">
+              <button class="btn btn-ghost" data-import-xml>Importa XML</button>
+              <button class="btn btn-primary" data-new${clienti.length ? '' : ' disabled title="Crea prima un cliente"'}>Nuova</button>
+            </div>
+            <input type="file" accept=".xml,text/xml,application/xml" multiple data-xml-input hidden />
+          </div>
+          <div class="filter-chips" style="margin-bottom:var(--space-3);">${chips}</div>
+          <div data-fatturato style="margin-bottom:var(--space-4);"></div>
+          <div class="fatture-table">
+            <div class="fatture-table-header">
+              <span>Numero</span><span>Cliente</span><span style="text-align:right;">Importo</span><span>Stato</span><span></span>
+            </div>
+            <ul data-list></ul>
+          </div>
+        </div>`;
+
+      main.querySelector<HTMLButtonElement>('[data-new]')?.addEventListener('click', () => openFatturaModal());
+      main.querySelectorAll<HTMLButtonElement>('[data-filter]').forEach((b) => b.addEventListener('click', () => {
+        filterKey = b.dataset.filter!; renderChips(); renderList();
+      }));
+
+      const fileInput = main.querySelector<HTMLInputElement>('[data-xml-input]');
+      main.querySelector<HTMLButtonElement>('[data-import-xml]')?.addEventListener('click', () => fileInput?.click());
+      fileInput?.addEventListener('change', async () => {
+        const files = Array.from(fileInput.files ?? []);
+        fileInput.value = '';
+        if (!files.length) return;
+        const items: ImportFatturaInput[] = [];
+        const erroriParse: string[] = [];
+        for (const file of files) {
+          try {
+            items.push(buildImportItem(parseFatturaXml(await file.text())));
+          } catch (err) {
+            erroriParse.push(`${file.name}: ${err instanceof ImportParseError ? err.message : 'XML non valido'}`);
+          }
+        }
+        if (!items.length) {
+          await alertModal('Import XML', `
+            <div class="import-report">
+              <p>Nessun XML valido.</p>
+              ${reportListHtml('File non parsati', erroriParse, 'err')}
+            </div>`);
+          return;
+        }
+        try {
+          const rep = await importXmlFatture(items);
+          await refresh();
+          await alertModal('Report import XML', importReportHtml(rep, erroriParse));
+        } catch (err) {
+          await alertModal('Errore import', `<p>${esc(err instanceof ApiError ? err.message : 'Errore import')}</p>`);
+        }
+      });
+
+      await loadLimite();
+      await refresh();
+    },
+    onUnmount: () => {
+      if (activeModalClose) { activeModalClose(); activeModalClose = null; }
+    },
+  });
 }

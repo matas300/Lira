@@ -42,8 +42,12 @@ async function navigate(pathname: string, push = true) {
 
 document.addEventListener('click', (e) => {
   const target = e.target as HTMLElement;
+  // Guard: elementi interattivi (select/input/...) dentro un [data-route]
+  // gestiscono il proprio click — non devono far navigare via.
+  const interactive = target.closest<HTMLElement>('select, input, textarea, label, button:not([data-route])');
   const link = target.closest<HTMLElement>('[data-route]');
   if (!link) return;
+  if (interactive && link.contains(interactive)) return;
   const path = link.dataset.route!;
   e.preventDefault();
   navigate(path);

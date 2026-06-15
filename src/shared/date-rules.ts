@@ -1,5 +1,6 @@
 // Date helpers per scadenze fiscali italiane: slittamento al primo giorno
-// lavorativo successivo (DPR 558/1999 art. 1), riconoscimento festività
+// lavorativo successivo (art. 18 c. 1 D.Lgs. 241/1997 per i festivi; art. 7
+// c. 1 lett. h) DL 70/2011 per il sabato), riconoscimento festività
 // nazionali fisse + Pasquetta (mobile).
 //
 // Tutte le operazioni di calendario usano `Date.UTC` per evitare shift di
@@ -106,7 +107,8 @@ export function isItalianHoliday(iso: string): boolean {
 }
 
 /**
- * Slittamento al primo giorno lavorativo successivo (DPR 558/1999 art. 1).
+ * Slittamento al primo giorno lavorativo successivo (art. 18 c. 1 D.Lgs.
+ * 241/1997 per i festivi; art. 7 c. 1 lett. h) DL 70/2011 per il sabato).
  * Se la data ISO ricade in sabato, domenica o festività nazionale, avanza
  * giorno per giorno fino al primo feriale non festivo.
  *

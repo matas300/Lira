@@ -2,12 +2,12 @@
 import { Hono } from 'hono';
 import { randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
-import { zValidator } from '@hono/zod-validator';
 import { getCookie } from 'hono/cookie';
 import { ProfileCreateInput } from '@shared/schemas';
 import { profiles } from '../db/schema';
 import { requireSession, SESSION_COOKIE, type AuthEnv } from '../middleware/auth';
 import { HttpError } from '../middleware/error';
+import { zJson } from '../middleware/validate';
 import { listProfilesForUser } from '../lib/users';
 import { setActiveProfile } from '../lib/session';
 
@@ -25,7 +25,7 @@ profilesRoute.get('/', async (c) => {
   return c.json({ profiles: list.map(toPublic) });
 });
 
-profilesRoute.post('/', zValidator('json', ProfileCreateInput), async (c) => {
+profilesRoute.post('/', zJson(ProfileCreateInput), async (c) => {
   const db = c.get('db');
   const userId = c.get('userId');
   const { slug, displayName } = c.req.valid('json');

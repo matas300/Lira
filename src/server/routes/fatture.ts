@@ -9,14 +9,14 @@
 // - DELETE solo su bozza. Transizioni (invia/paga/annulla) in coda al file.
 
 import { Hono } from 'hono';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, ne, sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { FatturaCreateInput, FatturaUpdateInput, NotaCreditoCreateInput, ImportXmlBody } from '@shared/schemas';
-import { isNCDateValid, computeStorno } from '@shared/nc-sync';
+import { FatturaCreateInput, FatturaUpdateInput, NotaCreditoCreateInput, ImportXmlBody, ImportFatturaInput, IsoDate } from '@shared/schemas';
+import { isNCDateValid, computeStorno, isOverStorno } from '@shared/nc-sync';
 import { matchCliente, dedupKey } from '@shared/import-fattura';
 import {
-  computeImporto, isBolloDovuto,
+  computeImporto, isBolloDovuto, SOGLIA_USCITA_FORFETTARIO,
   validateRitenutaForfettario, validateClienteSnapshot,
 } from '@shared/fattura-logic';
 import { fatture, clienti, yearSettings, profiles } from '../db/schema';
@@ -26,6 +26,8 @@ import { zJson } from '../middleware/validate';
 import { requireSession, type AuthEnv } from '../middleware/auth';
 import { readCedenteFromProfile } from '@shared/cedente';
 import { buildFatturaXml, validateFatturaForXml, type FatturaXmlInput } from '@shared/fattura-xml';
+import { buildFatturaPdfModel, validateFatturaForPdf, type FatturaPdfInput } from '@shared/fattura-pdf';
+import { renderFatturaPdf } from '../lib/fattura-pdf-render';
 
 export const fattureRoute = new Hono<AuthEnv>();
 fattureRoute.use('*', requireSession);
@@ -39,9 +41,16 @@ const FISCAL_FIELDS = ['clienteId', 'tipoDocumento', 'data', 'righe', 'ritenuta'
   'aliquotaRitenuta', 'tipoRitenuta', 'causaleRitenuta', 'contributoIntegrativo',
   'marcaDaBollo', 'bolloAddebitato'] as const;
 
+/**
+ * Data odierna nel fuso Europe/Rome (audit B23): dataInvioSdi/dataPagamento
+ * seguono il giorno fiscale italiano, non UTC (tra mezzanotte e l'1/2 ora
+ * locale UTC è ancora "ieri"). Intl con timeZone, nessuna dipendenza;
+ * 'en-CA' formatta nativamente YYYY-MM-DD.
+ */
 export function todayIso(): string {
-  const d = new Date();
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Rome', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
 }
 
 function parseJson<T>(raw: string | null, fallback: T): T {
@@ -177,6 +186,34 @@ fattureRoute.patch('/:id', zJson(FatturaUpdateInput), async (c) => {
       'Solo note/modalità di pagamento sono modificabili dopo l\'invio');
   }
 
+  // Il tipo documento è IMMUTABILE (audit A6, entrambe le direzioni): una bozza
+  // NC trasformata in TD01 (o viceversa) bypasserebbe i vincoli di storno e
+  // numerazione. Per cambiare tipo si crea un nuovo documento.
+  if (body.tipoDocumento !== undefined && body.tipoDocumento !== existing.tipoDocumento) {
+    throw new HttpError(409, 'TIPO_DOCUMENTO_IMMUTABILE',
+      'Il tipo documento non è modificabile: elimina la bozza e creane una nuova');
+  }
+
+  // Bozza NC (TD04): il PATCH non deve bypassare i vincoli imposti alla
+  // creazione (audit A6) — data ≥ data originale e importo ≤ residuo stornabile.
+  if (existing.tipoDocumento === 'TD04' && existing.fatturaOriginaleId
+      && (body.data !== undefined || body.righe !== undefined)) {
+    const [orig] = await db.select().from(fatture)
+      .where(and(eq(fatture.id, existing.fatturaOriginaleId), eq(fatture.profileId, profileId))).limit(1);
+    if (orig) {
+      const newData = body.data ?? existing.data;
+      if (!isNCDateValid(newData, orig.data)) {
+        throw new HttpError(422, 'NC_DATA_ANTERIORE',
+          `La data NC (${newData}) non può precedere l'originale (${orig.data})`);
+      }
+      const newImporto = body.righe !== undefined ? computeImporto(body.righe) : existing.importo;
+      if (isOverStorno(orig.importo, orig.ncTotaleImporto, newImporto)) {
+        throw new HttpError(422, 'NC_OVER_STORNO',
+          `L'importo della NC (${newImporto.toFixed(2)} €) supera il residuo stornabile della fattura originale (art. 26 DPR 633/72)`);
+      }
+    }
+  }
+
   const u: Partial<FatturaInsert> = {};
   if (body.clienteId !== undefined) {
     u.clienteId = body.clienteId;
@@ -248,10 +285,52 @@ fattureRoute.post('/:id/invia', async (c) => {
   const cliErr = validateClienteSnapshot(snapshot as never);
   if (cliErr) throw new HttpError(422, 'CLIENTE_INCOMPLETO', cliErr);
 
-  // Bollo dovuto (forfettario, imponibile > 77,47 €) → marca da bollo sulla fattura.
-  const bolloFlag = isBolloDovuto(regime, f.importo) ? 1 : f.marcaDaBollo;
+  // Importo non positivo non emettibile (audit A7): righe negative singole sono
+  // ammesse (es. sconto) ma il totale documento deve restare > 0.
+  if (!(f.importo > 0)) {
+    throw new HttpError(422, 'IMPORTO_NON_POSITIVO',
+      `Totale documento ${f.importo.toFixed(2)} €: una fattura con importo zero o negativo non è emettibile`);
+  }
 
   const iso = todayIso();
+
+  // Niente invio con data futura (audit M17): SdI riceve documenti emessi, non
+  // pianificati. Confronto su stringhe ISO nel giorno Europe/Rome.
+  if (f.data > iso) {
+    throw new HttpError(422, 'DATA_FUTURA',
+      `La data del documento (${f.data}) è successiva a oggi (${iso}): correggi la data prima di inviare`);
+  }
+
+  // Soglia 100.000 € di USCITA IMMEDIATA dal forfettario (L. 197/2022 art. 1
+  // c. 71, audit A10). Criterio PRUDENTE, documentato: sommiamo tutte le
+  // fatture EMESSE dell'anno (inviate/pagate/stornate, al netto delle NC TD04)
+  // e non solo quelle già incassate — l'incasso può maturare entro fine anno e
+  // superata la soglia l'IVA è dovuta dall'operazione eccedente, che Lira non
+  // sa fatturare. Meglio bloccare all'emissione che scoprirlo a posteriori.
+  if (f.tipoDocumento !== 'TD04' && regime === 'forfettario') {
+    const [tot] = await db.select({
+      emesso: sql<number>`coalesce(sum(case when ${fatture.tipoDocumento} = 'TD04' then -${fatture.importo} else ${fatture.importo} end), 0)`,
+    }).from(fatture).where(and(
+      eq(fatture.profileId, profileId),
+      eq(fatture.annoProgressivo, anno),
+      ne(fatture.stato, 'bozza'),
+    ));
+    const emesso = Number(tot?.emesso ?? 0);
+    if (emesso + f.importo > SOGLIA_USCITA_FORFETTARIO + 0.005) {
+      throw new HttpError(422, 'SOGLIA_100K',
+        `Con questa fattura i ricavi ${anno} salirebbero a ${(emesso + f.importo).toFixed(2)} €, oltre i `
+        + `${SOGLIA_USCITA_FORFETTARIO.toLocaleString('it-IT')} € di uscita immediata dal forfettario `
+        + `(L. 197/2022 art. 1 c. 71): l'operazione eccedente va fatturata con IVA, che Lira non supporta. `
+        + 'Confrontati con il commercialista prima di emettere.');
+    }
+  }
+
+  // Bollo dovuto (forfettario, imponibile > 77,47 €) → marca da bollo sulla
+  // fattura. MAI su TD04 (audit M16): l'XML della NC non emette DatiBollo,
+  // quindi forziamo 0 anche se la bozza aveva il flag attivo.
+  const bolloFlag = f.tipoDocumento === 'TD04'
+    ? 0
+    : (isBolloDovuto(regime, f.importo, f.tipoDocumento) ? 1 : f.marcaDaBollo);
 
   // Numerazione gap-free in un SINGOLO statement atomico: il progressivo è
   // calcolato inline come MAX(progressivo)+1 per (profilo, anno) e l'UPDATE
@@ -278,6 +357,15 @@ fattureRoute.post('/:id/invia', async (c) => {
     const [orig] = await tx.select().from(fatture)
       .where(and(eq(fatture.id, nc.fatturaOriginaleId!), eq(fatture.profileId, profileId))).limit(1);
     if (!orig) return; // originale cancellato (FK set null): niente storno
+    // Ricontrollo over-storno DENTRO la transazione (audit C2, art. 26 DPR
+    // 633/72): due NC parziali create in parallelo passano entrambe il check
+    // alla creazione, ma qui vediamo il ncTotaleImporto committato — la
+    // seconda che supera il residuo fa rollback anche della numerazione.
+    const prevIds = parseJson<string[]>(orig.ncIds, []);
+    if (!prevIds.includes(nc.id) && isOverStorno(orig.importo, orig.ncTotaleImporto, nc.importo)) {
+      throw new HttpError(422, 'NC_OVER_STORNO',
+        `Lo storno cumulato supererebbe l'importo della fattura originale (${Number(orig.importo).toFixed(2)} €, già stornati ${Number(orig.ncTotaleImporto).toFixed(2)} €) — art. 26 DPR 633/72`);
+    }
     const res = computeStorno({
       originaleImporto: orig.importo,
       originaleStato: orig.stato,
@@ -374,7 +462,7 @@ fattureRoute.post('/:id/annulla-pagamento', async (c) => {
 
 /** Crea un cliente dallo snapshot import. Ritorna l'id o null se fallisce. */
 async function tryCreateClienteFromSnapshot(
-  db: Db, profileId: string, snap: z.infer<typeof ImportXmlBody>['items'][number]['clienteSnapshot'],
+  db: Db, profileId: string, snap: z.infer<typeof ImportFatturaInput>['clienteSnapshot'],
 ): Promise<string | null> {
   const id = randomUUID();
   try {
@@ -420,7 +508,20 @@ fattureRoute.post('/import-xml', zJson(ImportXmlBody), async (c) => {
   const createdClienti = new Map<string, string>();
   const report = { importate: 0, clientiCreati: 0, saltate: [] as Array<{ numero: string; motivo: string }> };
 
-  for (const item of items) {
+  for (const raw of items) {
+    // Validazione PER-ITEM (audit M15): l'envelope items è volutamente lasco
+    // (z.unknown), ogni item è validato qui con ImportFatturaInput. Così si
+    // applicano i default dello schema — in particolare quantita=1 di
+    // RigaSchema, da cui dipende computeImporto — e i malformati finiscono nel
+    // report senza bloccare gli altri.
+    const parsed = ImportFatturaInput.safeParse(raw);
+    if (!parsed.success) {
+      const numero = raw && typeof raw === 'object' && 'numero' in raw
+        ? String((raw as { numero?: unknown }).numero ?? '?') : '?';
+      report.saltate.push({ numero, motivo: 'dati non validi' });
+      continue;
+    }
+    const item = parsed.data;
     // dedupKey usa numeroDisplay (ciò che è in DB sulle fatture esistenti),
     // non il numero raw: per i formati 'N/AAAA' i due divergono.
     const dk = dedupKey({ tipoDocumento: item.tipoDocumento, annoProgressivo: item.annoProgressivo, progressivo: item.progressivo, numero: item.numeroDisplay });
@@ -604,4 +705,79 @@ fattureRoute.get('/:id/xml', async (c) => {
   c.header('Content-Type', 'application/xml; charset=utf-8');
   c.header('Content-Disposition', `attachment; filename="${xmlFilename(cedRes.cedente.partitaIva, pub.numeroDisplay!)}.xml"`);
   return c.body(xml);
+});
+
+// ─────────── GET /:id/pdf ───────────
+
+/** Nome file leggibile: fattura_2025-3.pdf / nota-credito_2025-5.pdf / bozza_<id8>.pdf. */
+function pdfFilename(titolo: string, numero: string | null, fatturaId: string): string {
+  const base = titolo === 'Nota di Credito' ? 'nota-credito' : 'fattura';
+  if (numero) return `${base}_${numero.replace(/\//g, '-')}.pdf`;
+  return `bozza_${fatturaId.slice(0, 8)}.pdf`;
+}
+
+// A differenza dell'XML, il PDF è ammesso anche in bozza (preview watermarkata,
+// decisione 5D): nessun gate su numeroDisplay. Il cedente è comunque risolto
+// fail-fast (anche per la bozza serve un'anagrafica valida).
+fattureRoute.get('/:id/pdf', async (c) => {
+  const db = c.get('db');
+  const profileId = c.get('activeProfileId');
+  const id = c.req.param('id');
+
+  const [f] = await db.select().from(fatture)
+    .where(and(eq(fatture.id, id), eq(fatture.profileId, profileId))).limit(1);
+  if (!f) throw new HttpError(404, 'FATTURA_NOT_FOUND', `Fattura ${id} non trovata`);
+
+  const [profile] = await db.select().from(profiles).where(eq(profiles.id, profileId)).limit(1);
+  if (!profile) throw new HttpError(404, 'PROFILE_NOT_FOUND', 'Profilo non trovato');
+  const anno = annoFromData(f.data);
+  const regime = await regimeFor(db, profileId, anno);
+  const cedRes = readCedenteFromProfile({
+    anagrafica: parseJson<Record<string, unknown> | null>(profile.anagrafica, null),
+    attivita: parseJson<Record<string, unknown> | null>(profile.attivita, null),
+    regime,
+  });
+  if ('errors' in cedRes) {
+    throw new HttpError(422, 'CEDENTE_INCOMPLETO', 'Dati del cedente incompleti per il PDF', cedRes.errors);
+  }
+
+  // Riferimento alla fattura originale per le NC TD04 (best-effort: se manca,
+  // il PDF si genera comunque senza la riga di riferimento).
+  let fatturaOriginale: { numero: string; data: string } | undefined;
+  if (f.tipoDocumento === 'TD04' && f.fatturaOriginaleId) {
+    const [orig] = await db.select().from(fatture)
+      .where(and(eq(fatture.id, f.fatturaOriginaleId), eq(fatture.profileId, profileId))).limit(1);
+    if (orig?.numeroDisplay) fatturaOriginale = { numero: orig.numeroDisplay, data: orig.data };
+  }
+
+  const pub = toPublic(f);
+  const input: FatturaPdfInput = {
+    cedente: cedRes.cedente,
+    cliente: (pub.clienteSnapshot ?? {}) as FatturaPdfInput['cliente'],
+    numero: pub.numeroDisplay,
+    data: pub.data,
+    righe: pub.righe,
+    importo: pub.importo,
+    marcaDaBollo: pub.marcaDaBollo,
+    bolloAddebitato: pub.bolloAddebitato,
+    tipoDocumento: pub.tipoDocumento as 'TD01' | 'TD04',
+    fatturaOriginale,
+    stato: pub.stato,
+    note: pub.note,
+    modalitaPagamento: pub.modalitaPagamento,
+  };
+
+  // Validazione split per stato: emesso → fail-fast; bozza → best-effort ([]).
+  const errors = validateFatturaForPdf(input);
+  if (errors.length) {
+    throw new HttpError(422, 'FATTURA_PDF_INVALIDA', 'La fattura non è esportabile in PDF', errors);
+  }
+
+  const model = buildFatturaPdfModel(input);
+  const pdf = await renderFatturaPdf(model);
+  // Buffer → ArrayBuffer esatto (slice sull'offset) per il body Hono.
+  const ab = pdf.buffer.slice(pdf.byteOffset, pdf.byteOffset + pdf.byteLength) as ArrayBuffer;
+  c.header('Content-Type', 'application/pdf');
+  c.header('Content-Disposition', `inline; filename="${pdfFilename(model.titolo, model.numero, f.id)}"`);
+  return c.body(ab);
 });

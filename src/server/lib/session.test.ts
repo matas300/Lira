@@ -3,7 +3,17 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { createTestDb } from '../db/test-helper';
-import { createSession, getSession, refreshSession, deleteSession, deleteAllSessionsForUser } from './session';
+import {
+  createSession,
+  getSession,
+  needsRefresh,
+  refreshSession,
+  deleteSession,
+  deleteAllSessionsForUser,
+  deleteExpiredSessions,
+  SESSION_TTL_MS,
+  SESSION_REFRESH_INTERVAL_MS,
+} from './session';
 
 async function seedUser(client: import('@libsql/client').Client) {
   const userId = randomUUID();
@@ -73,6 +83,35 @@ test('refreshSession aggiorna lastUsedAt e estende expiresAt', async () => {
   assert.ok(after);
   assert.ok(new Date(after.lastUsedAt).getTime() > new Date('2025-12-31').getTime());
   assert.ok(new Date(after.expiresAt).getTime() > Date.now());
+});
+
+test('needsRefresh: false se appena rinnovata, true oltre 24h', () => {
+  const now = Date.now();
+  // appena creata: expiresAt = now + TTL → no refresh
+  assert.equal(needsRefresh({ expiresAt: new Date(now + SESSION_TTL_MS).toISOString() }, now), false);
+  // ultimo refresh 23h fa → ancora dentro l'intervallo, no refresh
+  const h23 = 23 * 60 * 60 * 1000;
+  assert.equal(needsRefresh({ expiresAt: new Date(now + SESSION_TTL_MS - h23).toISOString() }, now), false);
+  // ultimo refresh 25h fa → refresh dovuto
+  const h25 = 25 * 60 * 60 * 1000;
+  assert.equal(needsRefresh({ expiresAt: new Date(now + SESSION_TTL_MS - h25).toISOString() }, now), true);
+  // sanity: l'intervallo è 24h
+  assert.equal(SESSION_REFRESH_INTERVAL_MS, 24 * 60 * 60 * 1000);
+});
+
+test('deleteExpiredSessions rimuove solo le sessioni scadute', async () => {
+  const { db, client } = await createTestDb();
+  const { userId, profileId } = await seedUser(client);
+  const fresh = await createSession(db, userId, profileId);
+  const stale = await createSession(db, userId, profileId);
+  await client.execute({
+    sql: `UPDATE sessions SET expires_at = ? WHERE id = ?`,
+    args: ['2000-01-01T00:00:00.000Z', stale.id],
+  });
+  await deleteExpiredSessions(db);
+  const rows = await client.execute(`SELECT id FROM sessions`);
+  assert.equal(rows.rows.length, 1);
+  assert.equal((rows.rows[0] as any).id, fresh.id);
 });
 
 test('deleteSession rimuove la riga', async () => {

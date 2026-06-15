@@ -53,4 +53,6 @@ export interface ImportReport {
   importate: number;
   clientiCreati: number;
   saltate: Array<{ numero: string; motivo: string }>;
+  /** Item importati ma con anomalie non bloccanti (es. ImportoTotaleDocumento ≠ ricalcolo righe). */
+  warnings: Array<{ numero: string; motivo: string }>;
 }

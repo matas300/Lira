@@ -57,6 +57,23 @@ test('POST /api/profiles crea un nuovo profilo', async () => {
   assert.equal(body.profile.slug, 'peru');
 });
 
+test('POST /api/profiles con body invalido → 400 envelope VALIDATION', async () => {
+  const { db } = await createTestDb();
+  await createUserWithDefaultProfile({ db, email: 'a@b.it', password: 'pw-super-lunga-123', name: 'A' });
+  const app = makeApp(db);
+  const cookie = await login(app);
+  const res = await app.request('/api/profiles', {
+    method: 'POST',
+    headers: { cookie, 'content-type': 'application/json' },
+    body: JSON.stringify({ slug: 'NON Valido!', displayName: '' }),
+  });
+  assert.equal(res.status, 400);
+  const body = await res.json();
+  assert.equal(body.error.code, 'VALIDATION');
+  assert.equal(body.error.message, 'Dati non validi');
+  assert.ok(Array.isArray(body.error.details), 'details = issues Zod');
+});
+
 test('POST /api/profiles con slug duplicato → 409', async () => {
   const { db } = await createTestDb();
   await createUserWithDefaultProfile({ db, email: 'a@b.it', password: 'pw-super-lunga-123', name: 'A' });

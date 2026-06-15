@@ -32,6 +32,7 @@
 import {
   buildInstallmentExplanation,
   buildInstallmentStatus,
+  ceil2,
   type ForfettarioScenario,
   type InstallmentStatus,
   type ScheduleRow as TaxScheduleRow,
@@ -175,7 +176,10 @@ function buildSeeds(input: ScadenziarioInput): RowSeed[] {
           : params.quotaFissaAnnuaArtigiano;
       const riduzione =
         yearSettings.riduzione_35 === 1 ? FORFETTARIO_RULES.riduzioneInpsCoefficiente : 1;
-      rataFissa = (quotaFissa * riduzione) / 4;
+      // Fix audit: arrotonda a 2 decimali (FP-safe) — con riduzione 35% la
+      // divisione per 4 produce millesimi (es. 4460.64 × 0.65 / 4 = 724.854
+      // → 724.86), che non sono importi F24 validi.
+      rataFissa = ceil2((quotaFissa * riduzione) / 4);
     }
   }
 

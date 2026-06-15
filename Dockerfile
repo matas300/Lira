@@ -40,4 +40,5 @@ COPY --from=builder /app/drizzle ./drizzle
 EXPOSE 8080
 
 ENTRYPOINT ["/sbin/tini", "--"]
-CMD ["node", "dist/server/index.js"]
+# Migrazioni Drizzle (legge ./drizzle) prima di avviare il server.
+CMD ["sh", "-c", "node dist/server/migrate.js && node dist/server/index.js"]

@@ -6,9 +6,40 @@ body {
   background: var(--bg);
   color: var(--text);
   min-height: 100dvh;
+  letter-spacing: -.01em;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-display);
+  letter-spacing: -.025em;
+}
+::selection {
+  background: rgba(93,170,138,.28);
+  color: var(--text);
+}
+::placeholder { color: var(--color-text-faint); }
 a { color: inherit; text-decoration: none; }
 button { font: inherit; cursor: pointer; }
 input, textarea, select { font: inherit; color: inherit; }
+input:disabled, select:disabled { opacity: .4; cursor: not-allowed; }
+/* Select dark (port CalcoliVari style.css:701-708) */
+select {
+  background: var(--color-surface-3);
+  border: 1px solid var(--color-border);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  color-scheme: dark;
+}
+select option {
+  background: var(--surface2);
+  color: var(--text);
+}
 img, svg { display: block; max-width: 100%; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}

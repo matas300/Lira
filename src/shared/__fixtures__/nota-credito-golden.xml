@@ -55,7 +55,7 @@
   </FatturaElettronicaHeader>
   <FatturaElettronicaBody>
     <DatiGenerali>
-      <DatiGeneraliDocumento><TipoDocumento>TD04</TipoDocumento><Divisa>EUR</Divisa><Data>2026-04-01</Data><Numero>2026/2</Numero><ImportoTotaleDocumento>-1000.00</ImportoTotaleDocumento></DatiGeneraliDocumento>
+      <DatiGeneraliDocumento><TipoDocumento>TD04</TipoDocumento><Divisa>EUR</Divisa><Data>2026-04-01</Data><Numero>2026/2</Numero><ImportoTotaleDocumento>1000.00</ImportoTotaleDocumento></DatiGeneraliDocumento>
     <DatiFattureCollegate>
       <RiferimentoNumeroLinea>1</RiferimentoNumeroLinea>
       <IdDocumento>2026/1</IdDocumento>
@@ -68,14 +68,14 @@
       <Descrizione>Storno consulenza informatica</Descrizione>
       <Quantita>2.00</Quantita>
       <PrezzoUnitario>500.00</PrezzoUnitario>
-      <PrezzoTotale>-1000.00</PrezzoTotale>
+      <PrezzoTotale>1000.00</PrezzoTotale>
       <AliquotaIVA>0.00</AliquotaIVA>
       <Natura>N2.2</Natura>
     </DettaglioLinee>
       <DatiRiepilogo>
         <AliquotaIVA>0.00</AliquotaIVA>
         <Natura>N2.2</Natura>
-        <ImponibileImporto>-1000.00</ImponibileImporto>
+        <ImponibileImporto>1000.00</ImponibileImporto>
         <Imposta>0.00</Imposta>
         <RiferimentoNormativo>Regime forfettario: operazione in franchigia IVA e senza ritenuta d&apos;acconto Art.1 c.54-89 L.190/2014</RiferimentoNormativo>
       </DatiRiepilogo>
@@ -84,7 +84,7 @@
       <CondizioniPagamento>TP02</CondizioniPagamento>
       <DettaglioPagamento>
         <ModalitaPagamento>MP05</ModalitaPagamento>
-        <ImportoPagamento>-1000.00</ImportoPagamento>
+        <ImportoPagamento>1000.00</ImportoPagamento>
       </DettaglioPagamento>
     </DatiPagamento>
   </FatturaElettronicaBody>

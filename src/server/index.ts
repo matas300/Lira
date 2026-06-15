@@ -1,4 +1,6 @@
+import { existsSync } from 'node:fs';
 import { serve } from '@hono/node-server';
+import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
 import { logger } from 'hono/logger';
 import { getDb } from './db/client';
@@ -32,6 +34,24 @@ app.route('/api/clienti', clientiRoute);
 app.route('/api/fatture', fattureRoute);
 app.route('/api/scadenziario', scadenziarioRoute);
 app.route('/api/tax', taxRoute);
+
+// ── Static SPA (prod) ────────────────────────────────────────────────────────
+// In produzione il client buildato vive in ./dist/client (relativo alla cwd,
+// cioè /app nel container). In dev la dir può non esistere: il client gira su
+// Vite (5173) con proxy /api, quindi qui non serviamo nulla.
+const clientDir = './dist/client';
+if (existsSync(`${clientDir}/index.html`)) {
+  const assets = serveStatic({ root: clientDir });
+  const spaFallback = serveStatic({ path: `${clientDir}/index.html` });
+  app.use('*', (c, next) => {
+    if (c.req.path.startsWith('/api/')) return next();
+    return assets(c, next);
+  });
+  app.get('*', (c, next) => {
+    if (c.req.path.startsWith('/api/')) return next();
+    return spaFallback(c, next);
+  });
+}
 
 const port = Number(process.env.PORT ?? 8787);
 

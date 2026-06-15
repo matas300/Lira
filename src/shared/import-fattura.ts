@@ -15,6 +15,8 @@ export interface RawFattura {
   importoTotale: number;
   bolloImporto: number;
   modalitaPagamento: string;
+  /** Identificativi del CedentePrestatore (audit C3): per la verifica server-side fattura attiva vs passiva. */
+  cedente?: { partitaIva: string; idPaese: string; codiceFiscale: string };
   cliente: {
     denominazione: string; nome: string; cognome: string;
     partitaIva: string; idPaese: string; idCodice: string; codiceFiscale: string;
@@ -79,6 +81,11 @@ export function buildImportItem(raw: RawFattura): ImportFatturaInput {
   const nazione = (c.nazione || 'IT').toUpperCase();
   const tipoCliente = nazione !== 'IT' ? 'Estero' : (partitaIva ? 'PG' : 'PF');
 
+  // importo: preferiamo l'ImportoTotaleDocumento dell'XML quando presente, così
+  // il server può confrontarlo col ricalcolo righe e segnalare divergenze
+  // (sconti/maggiorazioni ignorati all'import → warning, audit M14).
+  const importoXml = Math.abs(Number(raw.importoTotale) || 0);
+
   return {
     tipoDocumento,
     numero: raw.numero,
@@ -87,9 +94,11 @@ export function buildImportItem(raw: RawFattura): ImportFatturaInput {
     progressivo,
     numeroDisplay,
     righe,
-    importo: computeImporto(righe),
+    importo: importoXml > 0 ? importoXml : computeImporto(righe),
     marcaDaBollo: raw.bolloImporto > 0,
     modalitaPagamento: raw.modalitaPagamento || null,
+    cedentePartitaIva: (raw.cedente?.partitaIva || '').trim() || null,
+    cedenteCodiceFiscale: (raw.cedente?.codiceFiscale || '').trim() || null,
     clienteSnapshot: {
       nome,
       tipoCliente,

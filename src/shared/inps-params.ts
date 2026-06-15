@@ -34,6 +34,17 @@ export interface InpsArtComParams {
   quotaFissaAnnuaCommerciante: number;
   aliquotaArtigiano: number; // 0.24
   aliquotaCommerciante: number; // 0.2448
+  // Fascia di reddito oltre la quale scatta la maggiorazione di 1 punto
+  // percentuale sull'aliquota della quota variabile (art. 3-ter DL 384/1992
+  // conv. L. 438/1992). Valore pubblicato ogni anno nella circolare INPS
+  // Artigiani/Commercianti — da riscontrare su circolare INPS annuale.
+  fasciaRedditoAliquotaMaggiorata: number;
+  // Aliquote maggiorate (+1 p.p.) applicate alla parte di reddito oltre la
+  // fascia, fino al massimale. Esplicitate (non derivate con +0.01) per
+  // fedeltà alla circolare e per evitare noise FP (0.2448 + 0.01 ≠ 0.2548
+  // in IEEE 754).
+  aliquotaArtigianoOltreFascia: number; // 0.25
+  aliquotaCommercianteOltreFascia: number; // 0.2548
   massimale: number;
 }
 
@@ -50,6 +61,10 @@ export const INPS_ARTCOM: Readonly<Record<number, Readonly<InpsArtComParams>>> =
     quotaFissaAnnuaCommerciante: 4515.43,
     aliquotaArtigiano: 0.24,
     aliquotaCommerciante: 0.2448,
+    // Circolare INPS 33/2024 — da riscontrare su circolare INPS annuale.
+    fasciaRedditoAliquotaMaggiorata: 55008,
+    aliquotaArtigianoOltreFascia: 0.25,
+    aliquotaCommercianteOltreFascia: 0.2548,
     massimale: 119650,
   }),
   2025: Object.freeze({
@@ -58,6 +73,10 @@ export const INPS_ARTCOM: Readonly<Record<number, Readonly<InpsArtComParams>>> =
     quotaFissaAnnuaCommerciante: 4549.70,
     aliquotaArtigiano: 0.24,
     aliquotaCommerciante: 0.2448,
+    // Circolare INPS 38/2025 — da riscontrare su circolare INPS annuale.
+    fasciaRedditoAliquotaMaggiorata: 55448,
+    aliquotaArtigianoOltreFascia: 0.25,
+    aliquotaCommercianteOltreFascia: 0.2548,
     massimale: 120607,
   }),
 });

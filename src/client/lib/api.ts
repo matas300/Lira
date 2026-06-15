@@ -16,9 +16,24 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   });
 
   const text = await res.text();
-  const json = text ? JSON.parse(text) : null;
+  let json: unknown = null;
+  if (text) {
+    // Risposta non-JSON (es. 502 HTML da un proxy): non lasciar trapelare un
+    // SyntaxError opaco — normalizza in ApiError.
+    try {
+      json = JSON.parse(text);
+    } catch {
+      throw new ApiError(res.status, 'INVALID_RESPONSE', `Risposta non valida dal server (HTTP ${res.status})`);
+    }
+  }
 
   if (!res.ok) {
+    // Sessione scaduta/mancante fuori dal flusso auth → torna al login.
+    // (/api/auth/* gestisce i propri 401: getMe() li usa per capire "non loggato".)
+    if (res.status === 401 && !path.startsWith('/api/auth/')) {
+      history.pushState({}, '', '/login');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }
     const env = json as ErrorEnvelope | null;
     throw new ApiError(
       res.status,
