@@ -75,3 +75,26 @@ export async function downloadFatturaXml(id: string): Promise<void> {
   a.remove();
   URL.revokeObjectURL(url);
 }
+
+/** Apre il PDF della fattura (preview inline) in una nuova scheda. Su errore lancia ApiError. */
+export async function openFatturaPdf(id: string): Promise<void> {
+  const res = await fetch(`/api/fatture/${id}/pdf`, { credentials: 'include' });
+  if (!res.ok) {
+    let code = 'HTTP_ERROR';
+    let message = `HTTP ${res.status}`;
+    let details: unknown;
+    try {
+      const env = await res.json() as { error?: { code?: string; message?: string; details?: unknown } };
+      code = env.error?.code ?? code;
+      message = env.error?.message ?? message;
+      details = env.error?.details;
+    } catch { /* corpo non-JSON */ }
+    const detailMsg = Array.isArray(details) && details.length ? `: ${(details as string[]).join('; ')}` : '';
+    throw new ApiError(res.status, code, message + detailMsg, details);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  window.open(url, '_blank');
+  // Revoca differita: revocare subito impedirebbe alla nuova scheda di caricare il blob.
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}

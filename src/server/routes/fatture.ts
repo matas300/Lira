@@ -26,6 +26,8 @@ import { zJson } from '../middleware/validate';
 import { requireSession, type AuthEnv } from '../middleware/auth';
 import { readCedenteFromProfile } from '@shared/cedente';
 import { buildFatturaXml, validateFatturaForXml, type FatturaXmlInput } from '@shared/fattura-xml';
+import { buildFatturaPdfModel, validateFatturaForPdf, type FatturaPdfInput } from '@shared/fattura-pdf';
+import { renderFatturaPdf } from '../lib/fattura-pdf-render';
 
 export const fattureRoute = new Hono<AuthEnv>();
 fattureRoute.use('*', requireSession);
@@ -703,4 +705,79 @@ fattureRoute.get('/:id/xml', async (c) => {
   c.header('Content-Type', 'application/xml; charset=utf-8');
   c.header('Content-Disposition', `attachment; filename="${xmlFilename(cedRes.cedente.partitaIva, pub.numeroDisplay!)}.xml"`);
   return c.body(xml);
+});
+
+// ─────────── GET /:id/pdf ───────────
+
+/** Nome file leggibile: fattura_2025-3.pdf / nota-credito_2025-5.pdf / bozza_<id8>.pdf. */
+function pdfFilename(titolo: string, numero: string | null, fatturaId: string): string {
+  const base = titolo === 'Nota di Credito' ? 'nota-credito' : 'fattura';
+  if (numero) return `${base}_${numero.replace(/\//g, '-')}.pdf`;
+  return `bozza_${fatturaId.slice(0, 8)}.pdf`;
+}
+
+// A differenza dell'XML, il PDF è ammesso anche in bozza (preview watermarkata,
+// decisione 5D): nessun gate su numeroDisplay. Il cedente è comunque risolto
+// fail-fast (anche per la bozza serve un'anagrafica valida).
+fattureRoute.get('/:id/pdf', async (c) => {
+  const db = c.get('db');
+  const profileId = c.get('activeProfileId');
+  const id = c.req.param('id');
+
+  const [f] = await db.select().from(fatture)
+    .where(and(eq(fatture.id, id), eq(fatture.profileId, profileId))).limit(1);
+  if (!f) throw new HttpError(404, 'FATTURA_NOT_FOUND', `Fattura ${id} non trovata`);
+
+  const [profile] = await db.select().from(profiles).where(eq(profiles.id, profileId)).limit(1);
+  if (!profile) throw new HttpError(404, 'PROFILE_NOT_FOUND', 'Profilo non trovato');
+  const anno = annoFromData(f.data);
+  const regime = await regimeFor(db, profileId, anno);
+  const cedRes = readCedenteFromProfile({
+    anagrafica: parseJson<Record<string, unknown> | null>(profile.anagrafica, null),
+    attivita: parseJson<Record<string, unknown> | null>(profile.attivita, null),
+    regime,
+  });
+  if ('errors' in cedRes) {
+    throw new HttpError(422, 'CEDENTE_INCOMPLETO', 'Dati del cedente incompleti per il PDF', cedRes.errors);
+  }
+
+  // Riferimento alla fattura originale per le NC TD04 (best-effort: se manca,
+  // il PDF si genera comunque senza la riga di riferimento).
+  let fatturaOriginale: { numero: string; data: string } | undefined;
+  if (f.tipoDocumento === 'TD04' && f.fatturaOriginaleId) {
+    const [orig] = await db.select().from(fatture)
+      .where(and(eq(fatture.id, f.fatturaOriginaleId), eq(fatture.profileId, profileId))).limit(1);
+    if (orig?.numeroDisplay) fatturaOriginale = { numero: orig.numeroDisplay, data: orig.data };
+  }
+
+  const pub = toPublic(f);
+  const input: FatturaPdfInput = {
+    cedente: cedRes.cedente,
+    cliente: (pub.clienteSnapshot ?? {}) as FatturaPdfInput['cliente'],
+    numero: pub.numeroDisplay,
+    data: pub.data,
+    righe: pub.righe,
+    importo: pub.importo,
+    marcaDaBollo: pub.marcaDaBollo,
+    bolloAddebitato: pub.bolloAddebitato,
+    tipoDocumento: pub.tipoDocumento as 'TD01' | 'TD04',
+    fatturaOriginale,
+    stato: pub.stato,
+    note: pub.note,
+    modalitaPagamento: pub.modalitaPagamento,
+  };
+
+  // Validazione split per stato: emesso → fail-fast; bozza → best-effort ([]).
+  const errors = validateFatturaForPdf(input);
+  if (errors.length) {
+    throw new HttpError(422, 'FATTURA_PDF_INVALIDA', 'La fattura non è esportabile in PDF', errors);
+  }
+
+  const model = buildFatturaPdfModel(input);
+  const pdf = await renderFatturaPdf(model);
+  // Buffer → ArrayBuffer esatto (slice sull'offset) per il body Hono.
+  const ab = pdf.buffer.slice(pdf.byteOffset, pdf.byteOffset + pdf.byteLength) as ArrayBuffer;
+  c.header('Content-Type', 'application/pdf');
+  c.header('Content-Disposition', `inline; filename="${pdfFilename(model.titolo, model.numero, f.id)}"`);
+  return c.body(ab);
 });

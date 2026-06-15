@@ -508,3 +508,80 @@ test('POST /import-xml — dedup per numeroDisplay (re-import formato N/AAAA →
   assert.equal(rep.importate, 0);
   assert.match(rep.saltate[0].motivo, /duplicat/i);
 });
+
+// ───── PDF (Slice 5D) ─────
+
+test('GET /:id/pdf — fattura inviata -> 200 application/pdf inline + %PDF-', async () => {
+  const { app, db, headers, profileId } = await makeApp();
+  await setCedente(db, profileId);
+  const cId = await clienteCompleto(db, profileId);
+  const f = await (await app.request('/api/fatture', {
+    method: 'POST', headers: J(headers),
+    body: JSON.stringify({ clienteId: cId, data: '2026-03-01', righe: [{ descrizione: 'x', prezzoUnitario: 1000 }] }),
+  })).json() as any;
+  await app.request(`/api/fatture/${f.id}/invia`, { method: 'POST', headers });
+
+  const r = await app.request(`/api/fatture/${f.id}/pdf`, { headers });
+  assert.equal(r.status, 200);
+  assert.match(r.headers.get('content-type') || '', /application\/pdf/);
+  assert.match(r.headers.get('content-disposition') || '', /inline; filename="fattura_2026-1\.pdf"/);
+  const buf = Buffer.from(await r.arrayBuffer());
+  assert.equal(buf.subarray(0, 5).toString('latin1'), '%PDF-');
+});
+
+test('GET /:id/pdf — bozza -> 200 (best-effort, NON 422) anche con cliente incompleto', async () => {
+  const { app, db, headers, profileId, clienteId } = await makeApp();
+  await setCedente(db, profileId);
+  // clienteId di makeApp: niente indirizzo/cap/citta → la bozza si renderizza comunque
+  const f = await (await app.request('/api/fatture', {
+    method: 'POST', headers: J(headers),
+    body: JSON.stringify({ clienteId, data: '2026-03-01', righe: [{ descrizione: 'x', prezzoUnitario: 1000 }] }),
+  })).json() as any;
+  const r = await app.request(`/api/fatture/${f.id}/pdf`, { headers });
+  assert.equal(r.status, 200);
+  assert.match(r.headers.get('content-disposition') || '', /inline; filename="bozza_/);
+  const buf = Buffer.from(await r.arrayBuffer());
+  assert.equal(buf.subarray(0, 5).toString('latin1'), '%PDF-');
+});
+
+test('GET /:id/pdf — emesso + cedente incompleto -> 422 CEDENTE_INCOMPLETO', async () => {
+  const { app, db, headers, profileId } = await makeApp();
+  const cId = await clienteCompleto(db, profileId);
+  const f = await (await app.request('/api/fatture', {
+    method: 'POST', headers: J(headers),
+    body: JSON.stringify({ clienteId: cId, data: '2026-03-01', righe: [{ descrizione: 'x', prezzoUnitario: 1000 }] }),
+  })).json() as any;
+  await app.request(`/api/fatture/${f.id}/invia`, { method: 'POST', headers });
+  const r = await app.request(`/api/fatture/${f.id}/pdf`, { headers });
+  assert.equal(r.status, 422);
+  assert.equal(((await r.json()) as any).error.code, 'CEDENTE_INCOMPLETO');
+});
+
+test('GET /:id/pdf — NC TD04 -> 200 application/pdf nota-credito', async () => {
+  const { app, db, headers, profileId } = await makeApp();
+  await setCedente(db, profileId);
+  const cId = await clienteCompleto(db, profileId);
+  const orig = await inviaOriginale(app, headers, cId);
+  const nc = await (await app.request(`/api/fatture/${orig.id}/nota-credito`, {
+    method: 'POST', headers: J(headers),
+    body: JSON.stringify({ data: '2026-04-01', righe: [{ descrizione: 'Storno', prezzoUnitario: 1000 }] }),
+  })).json() as any;
+  await app.request(`/api/fatture/${nc.id}/invia`, { method: 'POST', headers });
+  const r = await app.request(`/api/fatture/${nc.id}/pdf`, { headers });
+  assert.equal(r.status, 200);
+  assert.match(r.headers.get('content-type') || '', /application\/pdf/);
+  assert.match(r.headers.get('content-disposition') || '', /inline; filename="nota-credito_/);
+});
+
+test('GET /:id/pdf — id altro profilo -> 404', async () => {
+  const { app: appA, db: dbA, headers: hA, profileId: pA } = await makeApp('a2@x.it');
+  const { app: appB, headers: hB } = await makeApp('b2@x.it');
+  await setCedente(dbA, pA);
+  const cId = await clienteCompleto(dbA, pA);
+  const f = await (await appA.request('/api/fatture', {
+    method: 'POST', headers: J(hA),
+    body: JSON.stringify({ clienteId: cId, data: '2026-03-01', righe: [{ descrizione: 'x', prezzoUnitario: 1 }] }),
+  })).json() as any;
+  const r = await appB.request(`/api/fatture/${f.id}/pdf`, { headers: hB });
+  assert.equal(r.status, 404);
+});
