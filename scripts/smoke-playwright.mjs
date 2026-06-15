@@ -182,12 +182,12 @@ async function main() {
     check('Pulsante invia presente', false, 'nessun [data-invia]');
   }
 
-  // Segna pagata: il bottone € apre un prompt(date) → lo accetto con la data odierna.
+  // Segna pagata: il bottone € apre un modal con input date (precompilato a oggi).
   const pagaBtn = page.locator('[data-paga]').first();
   if ((await pagaBtn.count()) > 0) {
-    const today = new Date().toISOString().slice(0, 10);
-    page.once('dialog', (d) => d.accept(today));
     await pagaBtn.click();
+    await page.waitForTimeout(500);
+    await page.click('[data-date-form] button[type="submit"]');
     await page.waitForTimeout(1500);
     const listFatt2 = await page.textContent('[data-list]').catch(() => '');
     check('Fattura segnata PAGATA', !!listFatt2 && listFatt2.includes('PAGATA'),
@@ -215,9 +215,11 @@ async function main() {
   await writeFile(tmpXml, xmlContent, 'utf8');
   await page.goto(`${BASE_URL}/fatture`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(1000);
-  page.once('dialog', (d) => d.accept()); // alert del report
   await page.setInputFiles('[data-xml-input]', tmpXml);
   await page.waitForTimeout(2000);
+  // Il report import è ora un modal: lo chiudo con OK prima di leggere la lista.
+  await page.click('.modal-backdrop [data-ok]').catch(() => {});
+  await page.waitForTimeout(300);
   const listImport = await page.textContent('[data-list]').catch(() => '');
   check('Fattura XML importata (2026/99 in lista)', !!listImport && listImport.includes('2026/99'),
     `list="${(listImport || '').slice(0, 140)}"`);

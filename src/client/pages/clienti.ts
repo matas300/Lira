@@ -1,19 +1,11 @@
 // src/client/pages/clienti.ts
-import { getMe } from '../lib/auth';
 import { ApiError } from '../lib/api';
-import { renderHeader, wireHeader } from '../components/header';
-import { renderBottomNav } from '../components/bottom-nav';
-import { openModal } from '../components/modal';
+import { esc, mountPage } from '../lib/dom';
+import { openModal, confirmModal } from '../components/modal';
 import {
   listClienti, createCliente, updateCliente, removeCliente, lookupPiva,
 } from '../lib/clienti-api';
 import type { ClientePublic, TipoCliente } from '@shared/types';
-
-function esc(v: unknown): string {
-  return String(v ?? '').replace(/[&<>"']/g, (ch) => (
-    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]!
-  ));
-}
 
 const TIPI: TipoCliente[] = ['PF', 'PG', 'PA', 'Estero'];
 
@@ -25,7 +17,6 @@ const AUTOFILL_KEYS = new Set([
 ]);
 
 export function mount(container: HTMLElement): () => void {
-  let cleanupHeader: (() => void) | null = null;
   let clienti: ClientePublic[] = [];
   let filter = '';
   // Handle del modal aperto: serve per chiuderlo se l'utente naviga via
@@ -39,14 +30,13 @@ export function mount(container: HTMLElement): () => void {
   }
 
   function rowHtml(c: ClientePublic): string {
-    const star = c.isDefault ? '★ ' : '';
-    const sub = [c.partitaIva, c.citta].filter(Boolean).map(esc).join(' · ');
     return `
-      <li data-id="${esc(c.id)}" class="cliente-row"
-          style="display:flex;justify-content:space-between;align-items:center;padding:var(--space-3);
-                 background:var(--bg);border-radius:var(--radius-md);cursor:pointer;">
-        <span><strong>${star}${esc(c.nome)}</strong>
-          <span style="color:var(--text-muted);">${sub}</span></span>
+      <li data-id="${esc(c.id)}" class="cliente-row clienti-table-row">
+        <span class="cliente-star${c.isDefault ? ' is-default' : ''}" title="${c.isDefault ? 'Cliente predefinito' : ''}" aria-hidden="true">★</span>
+        <span class="nome">${esc(c.nome)}</span>
+        <span class="piva">${esc(c.partitaIva ?? '')}</span>
+        <span class="citta">${esc(c.citta ?? '')}</span>
+        <span class="chevron">›</span>
       </li>`;
   }
 
@@ -86,7 +76,7 @@ export function mount(container: HTMLElement): () => void {
         <p class="form-error" data-error hidden></p>
         <div style="display:flex;gap:var(--space-2);justify-content:space-between;">
           <button type="submit" class="btn btn-primary">Salva</button>
-          ${c.id ? `<button type="button" class="btn btn-ghost" data-delete style="color:var(--red);">Elimina</button>` : ''}
+          ${c.id ? `<button type="button" class="btn btn-danger" data-delete>Elimina</button>` : ''}
         </div>
       </form>`;
   }
@@ -147,7 +137,11 @@ export function mount(container: HTMLElement): () => void {
         });
 
         form.querySelector<HTMLButtonElement>('[data-delete]')?.addEventListener('click', async () => {
-          if (!existing || !confirm(`Eliminare il cliente "${existing.nome}"?`)) return;
+          if (!existing) return;
+          const ok = await confirmModal(`Eliminare il cliente "${existing.nome}"?`, {
+            title: 'Elimina cliente', confirmLabel: 'Elimina', danger: true,
+          });
+          if (!ok) return;
           await removeCliente(existing.id);
           close();
           await refresh();
@@ -182,7 +176,7 @@ export function mount(container: HTMLElement): () => void {
     const visible = clienti.filter(matches);
     ul.innerHTML = visible.length
       ? visible.map(rowHtml).join('')
-      : `<li style="color:var(--text-muted);padding:var(--space-3);">Nessun cliente.</li>`;
+      : `<li class="table-empty">Nessun cliente.</li>`;
     ul.querySelectorAll<HTMLElement>('.cliente-row').forEach((li) => {
       li.addEventListener('click', () => {
         const c = clienti.find((x) => x.id === li.dataset.id);
@@ -196,42 +190,34 @@ export function mount(container: HTMLElement): () => void {
     renderList();
   }
 
-  async function render(): Promise<void> {
-    const me = await getMe();
-    if (!me) {
-      history.pushState({}, '', '/login');
-      window.dispatchEvent(new PopStateEvent('popstate'));
-      return;
-    }
-    container.innerHTML = `
-      <div class="app-shell">
-        ${renderHeader(me, render)}
-        <main class="app-main">
-          <div class="card">
-            <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-3);margin-bottom:var(--space-4);">
-              <h2 style="margin:0;">Clienti</h2>
-              <button class="btn btn-primary" data-new>Nuovo</button>
-            </div>
-            <input class="input" data-search placeholder="Cerca per nome, P.IVA, città…" style="margin-bottom:var(--space-4);" />
-            <ul data-list style="list-style:none;display:flex;flex-direction:column;gap:var(--space-3);"></ul>
+  return mountPage({
+    container,
+    route: '/clienti',
+    render: async ({ main }) => {
+      main.innerHTML = `
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-3);margin-bottom:var(--space-4);">
+            <h2 style="margin:0;">Clienti</h2>
+            <button class="btn btn-primary" data-new>Nuovo</button>
           </div>
-        </main>
-        ${renderBottomNav()}
-      </div>`;
-    if (cleanupHeader) cleanupHeader();
-    cleanupHeader = wireHeader(container, render);
+          <input class="input" data-search placeholder="Cerca per nome, P.IVA, città…" />
+          <div class="clienti-table">
+            <div class="clienti-table-header">
+              <span></span><span>Nome</span><span>P.IVA</span><span>Città</span><span></span>
+            </div>
+            <ul data-list></ul>
+          </div>
+        </div>`;
 
-    container.querySelector<HTMLButtonElement>('[data-new]')?.addEventListener('click', () => openClienteModal());
-    container.querySelector<HTMLInputElement>('[data-search]')?.addEventListener('input', (e) => {
-      filter = (e.target as HTMLInputElement).value;
-      renderList();
-    });
-    await refresh();
-  }
-
-  render();
-  return () => {
-    if (cleanupHeader) cleanupHeader();
-    if (activeModalClose) { activeModalClose(); activeModalClose = null; }
-  };
+      main.querySelector<HTMLButtonElement>('[data-new]')?.addEventListener('click', () => openClienteModal());
+      main.querySelector<HTMLInputElement>('[data-search]')?.addEventListener('input', (e) => {
+        filter = (e.target as HTMLInputElement).value;
+        renderList();
+      });
+      await refresh();
+    },
+    onUnmount: () => {
+      if (activeModalClose) { activeModalClose(); activeModalClose = null; }
+    },
+  });
 }
