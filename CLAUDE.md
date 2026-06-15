@@ -200,3 +200,17 @@ I dati storici (fatture, pagamenti, clienti) di Mattia/Peru sono distribuiti tra
 Lo script `scripts/import-from-calcolivari.ts` (da implementare) accetta uno o più JSON export e li importa nel DB di Lira, con merge "longest wins" per gestire backup multipli.
 
 **Pagamenti persi** (incident 2026-05-25): per recuperarli, scaricare il documento Firestore dal device che li ha ancora, esportare JSON, e darlo in pasto allo script.
+
+## Agent skills
+
+### Issue tracker
+
+Issues tracked as GitHub issues in `matas300/Lira` via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default five-role vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
