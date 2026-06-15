@@ -1,24 +1,23 @@
 // src/test-fixtures/golden-regression.test.ts
 // Golden regression tests: ancore numeriche sul tax-engine.
 //
-// Procedura di calibrazione (TDD-style per regression anchoring):
-// 1. Le fixture (mattia-2025.ts, peru-2025.ts) partono con expected = 0.
-// 2. Questo test fallisce al primo run.
-// 3. Si leggono i valori reali dall'output di buildForfettarioScenario.
-// 4. Si copiano i valori nelle fixture, sovrascrivendo gli zero placeholder.
-// 5. Il test torna verde. I numeri sono ora CONGELATI: ogni futura modifica
-//    al tax-engine che li altera fallira questo test, costringendo a una
-//    ri-calibrazione esplicita (intenzionale, non accidentale).
+// I valori `expected` delle fixture (mattia-2025.ts, peru-2025.ts) sono
+// CALCOLATI A MANO con le fonti normative (vedi la derivazione passo-passo
+// nei commenti di ciascuna fixture), NON congelati dall'output del motore:
+// il golden è un controllo INDIPENDENTE. Ogni futura modifica al tax-engine
+// che alteri questi numeri fallirà il test e imporrà di rifare il calcolo
+// manuale, non di ricopiare l'output.
 //
-// I numeri qui non hanno valore fiscale assoluto — sono "ancore" che
-// proteggono dalla drift quando si toccano internals (params INPS, regole
-// acconto, split logic, ecc.).
+// Ricalibrazione audit giugno 2026: introdotti contributi INPS variabili
+// (quota eccedente il minimale), acconti imposta 50/50 (art. 58 DL 124/2019)
+// e ceil2 FP-safe (4 rate fisse uguali da 1.115,16 → deducibile 4.460,64,
+// non più 4.460,66).
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { MATTIA_2025, type GoldenFixture } from './mattia-2025';
 import { PERU_2025 } from './peru-2025';
-import { buildForfettarioScenario } from '@server/lib/tax-engine';
+import { buildForfettarioScenario, type ForfettarioScenario } from '@server/lib/tax-engine';
 import { getInpsArtComForYear } from '@shared/inps-params';
 
 function runFor(fx: GoldenFixture) {
@@ -26,34 +25,33 @@ function runFor(fx: GoldenFixture) {
   return buildForfettarioScenario({
     ...fx.input,
     currentContribution: {
-      mode: 'artigiani_commercianti',
+      ...fx.input.currentContribution,
       fixedAnnual: inps.quotaFissaAnnuaArtigiano,
-      saldoAccontoBase: 0,
     },
     previousContribution: {
-      mode: 'artigiani_commercianti',
+      ...fx.input.previousContribution,
       fixedAnnual: inps.quotaFissaAnnuaArtigiano,
-      saldoAccontoBase: 0,
     },
   });
 }
 
-test('GOLDEN Mattia 2025: numeri tax-engine bloccati', () => {
-  const out = runFor(MATTIA_2025);
-  assert.equal(out.forfettarioGrossIncome, MATTIA_2025.expected.forfettarioGrossIncome);
-  assert.equal(out.taxableBase, MATTIA_2025.expected.taxableBase);
-  assert.equal(out.substituteTax, MATTIA_2025.expected.substituteTax);
-  assert.equal(out.taxSaldo, MATTIA_2025.expected.taxSaldo);
-  assert.equal(out.deductibleContributionsPaid, MATTIA_2025.expected.deductibleContributionsPaid);
-  assert.equal(out.formula.length, MATTIA_2025.expected.formula_lenght);
+function assertGolden(out: ForfettarioScenario, fx: GoldenFixture) {
+  assert.equal(out.forfettarioGrossIncome, fx.expected.forfettarioGrossIncome);
+  assert.equal(out.taxableBase, fx.expected.taxableBase);
+  assert.equal(out.substituteTax, fx.expected.substituteTax);
+  assert.equal(out.taxSaldo, fx.expected.taxSaldo);
+  assert.equal(out.deductibleContributionsPaid, fx.expected.deductibleContributionsPaid);
+  assert.equal(out.contributiVariabiliDovuti, fx.expected.contributiVariabiliDovuti);
+  assert.equal(out.contributionSaldo, fx.expected.contributionSaldo);
+  assert.equal(out.taxAcconti.first, fx.expected.taxAccontoFirst);
+  assert.equal(out.taxAcconti.second, fx.expected.taxAccontoSecond);
+  assert.equal(out.formula.length, fx.expected.formula_lenght);
+}
+
+test('GOLDEN Mattia 2025: numeri tax-engine bloccati (calcolo manuale)', () => {
+  assertGolden(runFor(MATTIA_2025), MATTIA_2025);
 });
 
-test('GOLDEN Peru 2025: numeri tax-engine bloccati', () => {
-  const out = runFor(PERU_2025);
-  assert.equal(out.forfettarioGrossIncome, PERU_2025.expected.forfettarioGrossIncome);
-  assert.equal(out.taxableBase, PERU_2025.expected.taxableBase);
-  assert.equal(out.substituteTax, PERU_2025.expected.substituteTax);
-  assert.equal(out.taxSaldo, PERU_2025.expected.taxSaldo);
-  assert.equal(out.deductibleContributionsPaid, PERU_2025.expected.deductibleContributionsPaid);
-  assert.equal(out.formula.length, PERU_2025.expected.formula_lenght);
+test('GOLDEN Peru 2025: numeri tax-engine bloccati (calcolo manuale)', () => {
+  assertGolden(runFor(PERU_2025), PERU_2025);
 });

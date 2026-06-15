@@ -73,6 +73,43 @@ test('FatturaCreateInput — data non ISO → throw', () => {
   }));
 });
 
+// ───── IsoDate (audit M17) ─────
+import { IsoDate, PagamentoCreateInput } from './schemas';
+
+test('IsoDate — accetta solo date reali del calendario', () => {
+  assert.equal(IsoDate.parse('2026-03-01'), '2026-03-01');
+  assert.equal(IsoDate.parse('2024-02-29'), '2024-02-29'); // bisestile
+  assert.throws(() => IsoDate.parse('2026-99-99'));
+  assert.throws(() => IsoDate.parse('2026-02-30'));
+  assert.throws(() => IsoDate.parse('2026-13-01'));
+  assert.throws(() => IsoDate.parse('2026-3-1'));
+});
+
+test('FatturaCreateInput — data inesistente (2026-99-99) → throw', () => {
+  assert.throws(() => FatturaCreateInput.parse({
+    clienteId: 'c1', data: '2026-99-99', righe: [{ descrizione: 'x', prezzoUnitario: 1 }],
+  }));
+});
+
+test('PagamentoCreateInput — bound: importo > 0, year 2000-2100, data reale', () => {
+  const ok = PagamentoCreateInput.parse({ year: 2026, data: '2026-06-30', tipo: 'tasse', importo: 1500 });
+  assert.equal(ok.importo, 1500);
+  assert.throws(() => PagamentoCreateInput.parse({ year: 2026, data: '2026-06-30', tipo: 'tasse', importo: 0 }));
+  assert.throws(() => PagamentoCreateInput.parse({ year: 2026, data: '2026-06-30', tipo: 'tasse', importo: -5 }));
+  assert.throws(() => PagamentoCreateInput.parse({ year: 1999, data: '2026-06-30', tipo: 'tasse', importo: 1 }));
+  assert.throws(() => PagamentoCreateInput.parse({ year: 2101, data: '2026-06-30', tipo: 'tasse', importo: 1 }));
+  assert.throws(() => PagamentoCreateInput.parse({ year: 2026, data: '2026-02-30', tipo: 'tasse', importo: 1 }));
+});
+
+// ───── Enum ripuliti (audit B22) ─────
+import { StatoFatturaEnum, TipoDocumentoEnum } from './schemas';
+
+test('enum — niente TD24 (non supportato) né stato annullata (irraggiungibile)', () => {
+  assert.throws(() => TipoDocumentoEnum.parse('TD24'));
+  assert.throws(() => StatoFatturaEnum.parse('annullata'));
+  assert.equal(TipoDocumentoEnum.parse('TD04'), 'TD04');
+});
+
 // ───── Note di Credito (Slice 5C) ─────
 import { NotaCreditoCreateInput } from './schemas';
 

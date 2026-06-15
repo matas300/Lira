@@ -3,6 +3,13 @@
 // Server-authoritative (vedi CLAUDE.md §Architettura) — il client può precalcolare,
 // ma la verità fiscale risiede qui.
 import { ACCONTO_RULES, type AccontoRules } from '@shared/acconto-rules';
+import { FORFETTARIO_RULES } from '@shared/forfettario-rules';
+import {
+  getInpsArtComForYear,
+  getInpsGsForYear,
+  type InpsArtComParams,
+  type InpsGsParams,
+} from '@shared/inps-params';
 import type { ScheduleFamily } from '@shared/schedule-keys';
 
 export interface AccontoPlan {
@@ -14,23 +21,29 @@ export interface AccontoPlan {
 }
 
 /**
- * Costruisce il piano acconti secondo art. 17 c. 3 DPR 435/2001.
+ * Costruisce il piano acconti dell'IMPOSTA secondo art. 17 c. 3 DPR 435/2001
+ * (soglie) + art. 58 DL 124/2019 e Ris. AdE 93/E/2019 (rate 50/50 per i
+ * soggetti ISA, forfettari inclusi).
  *
- * - imposta ≤ 51,65 €  → nessun acconto
- * - imposta ≤ 257,52 € → unico versamento a novembre (100%)
- * - imposta >  257,52 € → due rate (40% giugno + 60% novembre)
+ * - imposta <  51,65 €           → nessun acconto
+ * - 51,65 ≤ imposta < 257,52 €   → unico versamento a novembre (100%)
+ * - imposta ≥ 257,52 €           → due rate di pari importo (50% + 50%)
  *
+ * FIX BOUNDARY (audit): a esattamente 257,52 € il piano è SPLIT (≥, non >).
+ *
+ * Le soglie valgono per le IMPOSTE: per i contributi variabili usare
+ * `buildContributiAccontoPlan` (niente soglie, regole proprie per gestione).
  * Le soglie sono in `ACCONTO_RULES` (@shared/acconto-rules) per evitare magic numbers.
  */
 export function buildAccontoPlan(baseAmount: number, rules?: AccontoRules): AccontoPlan {
   const cfg = rules ?? ACCONTO_RULES;
   const base = ceil2(baseAmount);
 
-  if (base <= cfg.thresholdZero) {
+  if (base < cfg.thresholdZero) {
     return { base, total: 0, first: 0, second: 0, mode: 'none' };
   }
 
-  if (base <= cfg.thresholdSingle) {
+  if (base < cfg.thresholdSingle) {
     return { base, total: base, first: 0, second: base, mode: 'single' };
   }
 
@@ -44,12 +57,174 @@ export function buildAccontoPlan(baseAmount: number, rules?: AccontoRules): Acco
   };
 }
 
+// Acconto Gestione Separata: 80% del dovuto presunto, versato in due rate
+// del 40% ciascuna alle scadenze delle imposte (art. 18 c. 4 D.Lgs. 241/1997;
+// per i professionisti GS la misura dell'acconto è l'80% — L. 449/1997 art.
+// 59 c. 16 e prassi INPS annuale).
+const GS_ACCONTO_RATA = 0.4;
+const GS_ACCONTO_TOTALE = 0.8;
+
+/**
+ * Costruisce il piano acconti dei CONTRIBUTI VARIABILI. Le soglie 51,65 /
+ * 257,52 dell'art. 17 c. 3 DPR 435/2001 valgono SOLO per le imposte e qui
+ * NON si applicano (fix audit: piano contributivo separato).
+ *
+ * - Artigiani/commercianti: due rate di pari importo (50% + 50%) alle
+ *   scadenze delle imposte (30/06 e 30/11), senza soglie minime.
+ * - Gestione Separata: acconto complessivo = 80% del dovuto presunto, in
+ *   due rate del 40% ciascuna (`total = 80% base`, `first = second = 40%`).
+ *
+ * `base` nel piano restituito è sempre il dovuto presunto di riferimento
+ * (per GS quindi `total < base` by design).
+ */
+export function buildContributiAccontoPlan(
+  baseAmount: number,
+  gestione: 'artigiani_commercianti' | 'gestione_separata',
+): AccontoPlan {
+  const base = ceil2(baseAmount);
+  if (base <= 0) {
+    return { base: Math.max(base, 0), total: 0, first: 0, second: 0, mode: 'none' };
+  }
+
+  if (gestione === 'gestione_separata') {
+    const first = ceil2(base * GS_ACCONTO_RATA);
+    const total = ceil2(base * GS_ACCONTO_TOTALE);
+    const second = ceil2(total - first);
+    return { base, total, first, second, mode: 'double' };
+  }
+
+  const parts = splitByWeights(base, [50, 50]);
+  return {
+    base,
+    total: base,
+    first: parts[0] ?? 0,
+    second: parts[1] ?? 0,
+    mode: 'double',
+  };
+}
+
+// --- Contributi INPS variabili (fix audit: quota variabile mai calcolata) --
+
+/**
+ * Quota variabile INPS Artigiani/Commercianti sul reddito eccedente il
+ * minimale (Circolare INPS annuale; base = reddito forfettario LORDO,
+ * ricavi × coefficiente, ANTE deduzione dei contributi — Circ. INPS 35/2016).
+ *
+ * - Prima fascia: aliquota base (24% artigiani / 24,48% commercianti) sulla
+ *   parte di reddito fra minimale e fascia di maggiorazione.
+ * - Seconda fascia (art. 3-ter DL 384/1992 conv. L. 438/1992): aliquota +1
+ *   p.p. (25% / 25,48%) sulla parte oltre la fascia, fino al massimale.
+ * - Riduzione 35% (art. 1 c. 77 L. 190/2014): si applica ANCHE alla quota
+ *   variabile (× 0,65), come per la quota fissa.
+ */
+export function calcContributiVariabiliArtCom(args: {
+  redditoLordo: number;
+  params: InpsArtComParams;
+  categoria: 'artigiano' | 'commerciante';
+  riduzione35: boolean;
+}): number {
+  const { redditoLordo, params, categoria, riduzione35 } = args;
+  const aliquotaBase =
+    categoria === 'commerciante' ? params.aliquotaCommerciante : params.aliquotaArtigiano;
+  const aliquotaOltre =
+    categoria === 'commerciante'
+      ? params.aliquotaCommercianteOltreFascia
+      : params.aliquotaArtigianoOltreFascia;
+
+  // Reddito rilevante: clampato fra 0 e massimale.
+  const reddito = Math.min(Math.max(redditoLordo, 0), params.massimale);
+  const primaFascia = Math.max(
+    Math.min(reddito, params.fasciaRedditoAliquotaMaggiorata) - params.minimaleAnnuo,
+    0,
+  );
+  const secondaFascia = Math.max(reddito - params.fasciaRedditoAliquotaMaggiorata, 0);
+
+  const pieno = aliquotaBase * primaFascia + aliquotaOltre * secondaFascia;
+  const conRiduzione = riduzione35 ? pieno * FORFETTARIO_RULES.riduzioneInpsCoefficiente : pieno;
+  return ceil2(conRiduzione);
+}
+
+/**
+ * Contributo INPS Gestione Separata (L. 335/1995 art. 2 c. 26): proporzionale
+ * sul reddito forfettario LORDO (ante deduzione contributi, Circ. INPS
+ * 35/2016), senza minimale, capped al massimale. Niente quota fissa e
+ * niente riduzione 35% (l'art. 1 c. 77 L. 190/2014 riguarda solo IVS
+ * artigiani/commercianti).
+ */
+export function calcContributiVariabiliGs(args: {
+  redditoLordo: number;
+  params: InpsGsParams;
+  altraCassa: boolean;
+}): number {
+  const { redditoLordo, params, altraCassa } = args;
+  const aliquota = altraCassa ? params.aliquotaConAltraCassa : params.aliquotaSenzaAltraCassa;
+  const base = Math.min(Math.max(redditoLordo, 0), params.massimale);
+  return ceil2(aliquota * base);
+}
+
+/**
+ * Risolve i parametri INPS dell'anno e calcola i contributi variabili per la
+ * gestione indicata. Se l'anno non è ancora pubblicato nelle tabelle
+ * (`getInps*ForYear` solleva), ritorna 0 — stessa convenzione "graceful" di
+ * scadenziario-engine per la quota fissa: il service espone già un warning
+ * per gli anni senza parametri.
+ */
+function calcContributiVariabiliAnno(
+  year: number,
+  redditoLordo: number,
+  contribution: ContributionParams,
+  riduzione35: boolean,
+): number {
+  if (contribution.mode === 'gestione_separata') {
+    let params: InpsGsParams | null = null;
+    try {
+      params = getInpsGsForYear(year);
+    } catch {
+      params = null;
+    }
+    if (!params) return 0;
+    return calcContributiVariabiliGs({
+      redditoLordo,
+      params,
+      altraCassa: contribution.altraCassa ?? false,
+    });
+  }
+  let params: InpsArtComParams | null = null;
+  try {
+    params = getInpsArtComForYear(year);
+  } catch {
+    params = null;
+  }
+  if (!params) return 0;
+  return calcContributiVariabiliArtCom({
+    redditoLordo,
+    params,
+    categoria: contribution.categoria ?? 'artigiano',
+    riduzione35,
+  });
+}
+
 // --- buildForfettarioScenario (port da CalcoliVari + fix A6) -------------
 
 export interface ContributionParams {
   mode: 'artigiani_commercianti' | 'gestione_separata';
   fixedAnnual: number;
+  /**
+   * Contributi VARIABILI dovuti per l'anno di competenza di questo record
+   * (per `previousContribution` = variabile dovuta per l'anno precedente):
+   * è la base del piano acconti contributivo col metodo storico.
+   */
   saldoAccontoBase: number;
+  /**
+   * Solo art/com: seleziona l'aliquota della quota variabile (24% artigiano
+   * / 24,48% commerciante, +1 p.p. oltre fascia). Default: 'artigiano'.
+   */
+  categoria?: 'artigiano' | 'commerciante';
+  /**
+   * Solo gestione separata: `true` se iscritto anche ad altra cassa /
+   * pensionato → aliquota 24% invece di 26,07%. Default: false.
+   */
+  altraCassa?: boolean;
 }
 
 export interface ScenarioInput {
@@ -69,9 +244,33 @@ export interface ScenarioInput {
   accontiSostitutivaPagatiReali: number;
   /** FIX A6: acconti contributi REALMENTE versati (non stimati). */
   accontiContribPagatiReali: number;
+  /**
+   * METODO PREVISIONALE (fix audit unità di misura): RICAVI LORDI PREVISTI
+   * per l'anno corrente (stessa unità di `grossCollected`, NON un'imposta
+   * né una base contributiva). L'engine vi applica internamente coefficiente,
+   * deduzione contributi, aliquota sostitutiva e regole INPS per derivare
+   * imposta prevista e contributi variabili previsti (stesse regole del
+   * consuntivo). Se omesso, fallback a `grossCollected`.
+   */
+  forecastGrossCollected?: number;
+  /**
+   * Contributi INPS EFFETTIVAMENTE VERSATI nell'anno (principio di cassa,
+   * art. 1 c. 64 L. 190/2014). Se fornito (anche 0), sostituisce la stima
+   * da piano (rate fisse + saldo precedente + acconti pianificati) nella
+   * deduzione dal reddito forfettario. Se `undefined`/`null`, fallback al
+   * piano come in precedenza.
+   */
+  contributiVersatiAnno?: number | null;
+  accontoRules?: AccontoRules;
+  /**
+   * WIP forecast previsionale (branch audit-fixes): basi previste passate dai
+   * call site (route tax + scadenziario-service). ATTENZIONE: l'engine NON le
+   * consuma ancora — la previsione usa `forecastGrossCollected` (o il fallback
+   * a `grossCollected`). Tipizzate come opzionali per non perdere l'intento
+   * finché la feature previsionale non viene completata; oggi sono inerti.
+   */
   forecastContributionBase?: number;
   forecastTaxBase?: number;
-  accontoRules?: AccontoRules;
 }
 
 export interface ForfettarioScenario {
@@ -86,10 +285,28 @@ export interface ForfettarioScenario {
   taxSaldo: number;
   taxAccontoBase: number;
   taxAcconti: AccontoPlan;
-  /** FIX A6: saldo contributi = ceil2(max(contribuzioneTotaleAnno - accontiContribPagatiReali, 0)). */
+  /**
+   * Contributi VARIABILI dovuti per l'anno (competenza N): quota eccedente
+   * il minimale art/com (con seconda fascia e cap massimale) oppure
+   * contributo proporzionale GS. Base = reddito forfettario LORDO (Circ.
+   * INPS 35/2016). Va a saldo il 30/6 N+1 insieme alle imposte e genera gli
+   * acconti N+1.
+   */
+  contributiVariabiliDovuti: number;
+  /** FIX A6: saldo contributi variabili = ceil2(max(contributiVariabiliDovuti - accontiContribPagatiReali, 0)). */
   contributionSaldo: number;
   contributionAccontoBase: number;
   contributionAcconti: AccontoPlan;
+  /** Ricavi previsti usati per il metodo previsionale (echo input o fallback a grossCollected). */
+  forecastGrossCollected: number;
+  /** Reddito forfettario lordo previsto = ceil2(forecastGrossCollected × coefficiente). */
+  forecastGrossIncome: number;
+  /** Contributi variabili previsti sul reddito previsto (stesse regole del consuntivo). */
+  forecastContributiVariabili: number;
+  /** Imponibile previsto = max(forecastGrossIncome - deductibleContributionsPaid, 0). */
+  forecastTaxableBase: number;
+  /** Imposta sostitutiva prevista — base del piano acconti col metodo previsionale. */
+  forecastSubstituteTax: number;
   previousFixedTail: number;
   currentFixedWithinYear: number;
   previousContributionSaldo: number;
@@ -107,6 +324,21 @@ export interface ForfettarioScenario {
  * (input `accontiSostitutivaPagatiReali` / `accontiContribPagatiReali`), non quelli
  * stimati dal piano. Questo evita il drift fra preventivo e consuntivo che era
  * uno dei rilievi A6 dell'audit 25/05/2026.
+ *
+ * Fix audit (giugno 2026) incorporati qui:
+ * - **Contributi variabili calcolati**: `contributiVariabiliDovuti` = quota
+ *   eccedente il minimale art/com (con seconda fascia e cap massimale) o
+ *   proporzionale GS, su reddito forfettario LORDO (Circ. INPS 35/2016).
+ *   Va a saldo il 30/6 N+1 e genera gli acconti N+1.
+ * - **Previsionale in ricavi**: il metodo previsionale riceve
+ *   `forecastGrossCollected` (RICAVI previsti) e deriva internamente imposta
+ *   e contributi previsti con le stesse regole del consuntivo.
+ * - **Piano acconti contributivo separato**: `buildContributiAccontoPlan`
+ *   (50/50 art/com senza soglie; 80% in due rate 40% per GS) al posto delle
+ *   soglie imposta dell'art. 17 c. 3 DPR 435/2001.
+ * - **Deduzione per cassa**: se `contributiVersatiAnno` è fornito, la
+ *   deduzione usa i versamenti effettivi (art. 1 c. 64 L. 190/2014) invece
+ *   del piano.
  *
  * Tutte le operazioni passano per `ceil2` per parità con CalcoliVari.
  */
@@ -133,22 +365,52 @@ export function buildForfettarioScenario(input: ScenarioInput): ForfettarioScena
     (currentFixedParts[0] ?? 0) + (currentFixedParts[1] ?? 0) + (currentFixedParts[2] ?? 0),
   );
 
+  // Contributi variabili dovuti per l'anno N (competenza): base = reddito
+  // forfettario LORDO, ante deduzione contributi (Circ. INPS 35/2016).
+  const contributiVariabiliDovuti = calcContributiVariabiliAnno(
+    input.year,
+    forfettarioGrossIncome,
+    input.currentContribution,
+    input.settings.riduzione35,
+  );
+
+  // Metodo previsionale: ricavi previsti → reddito lordo previsto →
+  // contributi variabili previsti, con gli stessi parametri dell'anno N.
+  const forecastGrossCollected = ceil2(input.forecastGrossCollected ?? input.grossCollected);
+  const forecastGrossIncome = ceil2(forecastGrossCollected * coeff);
+  const forecastContributiVariabili = calcContributiVariabiliAnno(
+    input.year,
+    forecastGrossIncome,
+    input.currentContribution,
+    input.settings.riduzione35,
+  );
+
   // Saldo eccedente dell'anno scorso (al netto degli acconti contributi già pagati lo scorso anno).
   const previousContributionSaldo = ceil2(
     Math.max(input.previousContribution.saldoAccontoBase - input.previousContributionAccontiPaid, 0),
   );
 
-  // Base acconto contributi (forecast in previsionale, storico altrimenti).
+  // Base acconto contributi: storico = variabile dovuta per l'anno scorso;
+  // previsionale = variabile prevista per l'anno corrente. Piano dedicato
+  // SENZA le soglie imposta (fix audit: piano contributivo separato).
   const contributionAccontoBase = ceil2(
     input.method === 'previsionale'
-      ? input.forecastContributionBase ?? 0
+      ? forecastContributiVariabili
       : input.previousContribution.saldoAccontoBase,
   );
-  const contributionAcconti = buildAccontoPlan(contributionAccontoBase, rules);
-
-  const deductibleContributionsPaid = ceil2(
-    previousFixedTail + currentFixedWithinYear + previousContributionSaldo + contributionAcconti.total,
+  const contributionAcconti = buildContributiAccontoPlan(
+    contributionAccontoBase,
+    input.currentContribution.mode,
   );
+
+  // Deduzione contributi (principio di cassa, art. 1 c. 64 L. 190/2014):
+  // versamenti EFFETTIVI se forniti dal service, altrimenti stima da piano.
+  const deductibleContributionsPaid =
+    input.contributiVersatiAnno != null
+      ? ceil2(Math.max(input.contributiVersatiAnno, 0))
+      : ceil2(
+          previousFixedTail + currentFixedWithinYear + previousContributionSaldo + contributionAcconti.total,
+        );
 
   const taxableBase = ceil2(Math.max(forfettarioGrossIncome - deductibleContributionsPaid, 0));
   const substituteTax = ceil2(taxableBase * substituteRate);
@@ -156,24 +418,24 @@ export function buildForfettarioScenario(input: ScenarioInput): ForfettarioScena
   // FIX A6: saldo sottrae gli acconti REALMENTE pagati (input dal service), non quelli stimati.
   const taxSaldo = ceil2(Math.max(substituteTax - input.accontiSostitutivaPagatiReali, 0));
 
-  // Base acconto tasse.
+  // Imposta prevista: stesse regole del consuntivo (deduzione contributi
+  // inclusa — i versamenti dell'anno non cambiano col reddito previsto).
+  const forecastTaxableBase = ceil2(Math.max(forecastGrossIncome - deductibleContributionsPaid, 0));
+  const forecastSubstituteTax = ceil2(forecastTaxableBase * substituteRate);
+
+  // Base acconto tasse: storico = imposta anno scorso; previsionale =
+  // imposta prevista calcolata internamente sui ricavi previsti.
   const taxAccontoBase = ceil2(
-    input.method === 'previsionale'
-      ? input.forecastTaxBase ?? substituteTax
-      : input.previousTaxBase,
+    input.method === 'previsionale' ? forecastSubstituteTax : input.previousTaxBase,
   );
   const taxAcconti = buildAccontoPlan(taxAccontoBase, rules);
 
-  // FIX A6 contributi: la contribuzione totale anno = quota fissa anno + base variabile,
-  // confrontata con acconti reali per produrre il saldo.
-  const contribuzioneTotaleAnno = ceil2(
-    previousFixedTail + currentFixedWithinYear +
-      (input.method === 'previsionale'
-        ? input.forecastContributionBase ?? 0
-        : input.previousContribution.saldoAccontoBase),
-  );
+  // FIX A6 + fix variabile: il saldo contributivo è simmetrico al saldo
+  // imposta — contributi variabili dovuti per l'anno meno acconti REALMENTE
+  // versati. Le quote fisse NON entrano nel saldo: hanno le proprie 4 rate
+  // dedicate nel calendario (inps_fissi_1..4).
   const contributionSaldo = ceil2(
-    Math.max(contribuzioneTotaleAnno - input.accontiContribPagatiReali, 0),
+    Math.max(contributiVariabiliDovuti - input.accontiContribPagatiReali, 0),
   );
 
   const managedCashOutflows = ceil2(deductibleContributionsPaid + taxAcconti.total);
@@ -190,8 +452,9 @@ export function buildForfettarioScenario(input: ScenarioInput): ForfettarioScena
     `Parto dagli incassi ${input.year} e applico il coefficiente di redditività ${ceil2(coeff * 100)}%.`,
     `Dalla base forfettaria sottraggo i contributi INPS obbligatori pagati o pianificati nel calendario ${input.year}.`,
     `Sull'imponibile fiscale risultante applico l'imposta sostitutiva del ${ceil2(substituteRate * 100)}%.`,
+    `Sul reddito forfettario lordo (ante deduzione contributi) calcolo i contributi INPS variabili dovuti per l'anno: ${contributiVariabiliDovuti.toFixed(2)} EUR (saldo al 30/6 dell'anno successivo).`,
     input.method === 'previsionale'
-      ? 'Questo scenario usa basi previsionali per gli acconti.'
+      ? 'Questo scenario usa basi previsionali per gli acconti (ricavi previsti, stesse regole del consuntivo).'
       : 'Questo scenario usa lo storico dell\'anno precedente per gli acconti.',
   ];
 
@@ -206,9 +469,15 @@ export function buildForfettarioScenario(input: ScenarioInput): ForfettarioScena
     taxSaldo,
     taxAccontoBase,
     taxAcconti,
+    contributiVariabiliDovuti,
     contributionSaldo,
     contributionAccontoBase,
     contributionAcconti,
+    forecastGrossCollected,
+    forecastGrossIncome,
+    forecastContributiVariabili,
+    forecastTaxableBase,
+    forecastSubstituteTax,
     previousFixedTail,
     currentFixedWithinYear,
     previousContributionSaldo,
@@ -468,13 +737,22 @@ export function buildInstallmentExplanation(row: ScheduleRow): string {
   return row.note ?? '';
 }
 
-// --- Helpers privati (non esportati) -------------------------------------
+// --- Helpers numerici -----------------------------------------------------
 
-function ceil2(n: number): number {
-  // True ceil to 2 decimals — porta da CalcoliVari/math-utils.js (ceil2).
-  // `Number.EPSILON` evita che noise FP (es. 0.30000000000000004) produca un cent in piu`.
+/**
+ * True ceil a 2 decimali, FP-safe (fix audit: la versione precedente usava
+ * `Number.EPSILON`, che è un epsilon ASSOLUTO efficace solo per n ≲ 2 — per
+ * importi reali `ceil2(4460.64)` dava 4460.65 e `splitByWeights` produceva
+ * rate disuguali).
+ *
+ * Strategia: si lavora su millesimi interi. `Math.round(n * 1000)` assorbe il
+ * noise IEEE 754 (es. 4460.6400000000003 → 4460640); il ceil è poi applicato
+ * sui decimi di centesimo, preservando la semantica "ceil vero" per i valori
+ * con terza cifra decimale reale (es. 724.854 → 724.86).
+ */
+export function ceil2(n: number): number {
   if (!n) return 0;
-  return Math.ceil(n * 100 - Number.EPSILON) / 100;
+  return Math.ceil(Math.round(n * 1000) / 10) / 100;
 }
 
 /**

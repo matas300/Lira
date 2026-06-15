@@ -92,6 +92,23 @@ export const YearSettingsPublic = YearSettingsInput.extend({
   year: z.number().int(),
 });
 
+// ───── Date ISO ─────
+/**
+ * Data ISO YYYY-MM-DD che esiste davvero nel calendario: la sola regex
+ * accettava "2026-99-99". Round-trip via Date UTC: se i componenti non
+ * combaciano la data era invalida (es. 2026-02-30 → 2026-03-02).
+ */
+export const IsoDate = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Data attesa in formato YYYY-MM-DD')
+  .refine((s) => {
+    const y = Number(s.slice(0, 4));
+    const m = Number(s.slice(5, 7));
+    const d = Number(s.slice(8, 10));
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+  }, { message: 'Data inesistente nel calendario' });
+
 // ───── Pagamenti ─────
 export const ScheduleKeyBreakdown = z.object({
   key: z.string(),
@@ -101,11 +118,12 @@ export const ScheduleKeyBreakdown = z.object({
 export const PagamentoTipoEnum = z.enum(['tasse', 'contributi', 'misto', 'altro', 'inail', 'camera', 'bollo']);
 
 export const PagamentoCreateInput = z.object({
-  year: z.number().int(),
-  data: z.string(),
+  // Bound ragionevoli (audit M17): year nel range gestibile, data reale, importo > 0.
+  year: z.number().int().min(2000).max(2100),
+  data: IsoDate,
   tipo: PagamentoTipoEnum,
   descrizione: z.string().optional(),
-  importo: z.number(),
+  importo: z.number().positive(),
   scheduleKey: z.string().nullable().optional(),
   linkedKeys: z.array(ScheduleKeyBreakdown).optional(),
   note: z.string().optional(),
@@ -121,7 +139,7 @@ export const PagamentoPublic = PagamentoCreateInput.extend({
 export const PagamentoQuickPayInput = z.object({
   scheduleKey: z.string(),
   importo: z.number().optional(),
-  data: z.string().optional(),
+  data: IsoDate.optional(),
   tipo: PagamentoTipoEnum.optional(),
 });
 
@@ -231,10 +249,10 @@ export const PivaLookupResult = z.object({
 
 // ───── Fatture (Slice 5A) ─────
 
-export const StatoFatturaEnum = z.enum(['bozza', 'inviata', 'pagata', 'stornata', 'annullata']);
-export const TipoDocumentoEnum = z.enum(['TD01', 'TD04', 'TD24']);
-
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+// 'annullata' rimossa (audit B22): nessuna transizione la raggiungeva.
+export const StatoFatturaEnum = z.enum(['bozza', 'inviata', 'pagata', 'stornata']);
+// TD24 rimosso (audit B22): non supportato dal builder XML (veniva castato a TD01).
+export const TipoDocumentoEnum = z.enum(['TD01', 'TD04']);
 
 export const RigaSchema = z.object({
   descrizione: z.string().trim().min(1).max(1000),
@@ -245,7 +263,7 @@ export const RigaSchema = z.object({
 export const FatturaCreateInput = z.object({
   clienteId: z.string().min(1),
   tipoDocumento: TipoDocumentoEnum.default('TD01'),
-  data: z.string().regex(ISO_DATE, 'Data attesa in formato YYYY-MM-DD'),
+  data: IsoDate,
   righe: z.array(RigaSchema).min(1, 'Almeno una riga'),
   ritenuta: z.number().min(0).default(0),
   aliquotaRitenuta: z.number().optional().nullable(),
@@ -302,7 +320,7 @@ export const FatturaPublic = z.object({
 // ───── Note di Credito (Slice 5C) ─────
 
 export const NotaCreditoCreateInput = z.object({
-  data: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data attesa in formato YYYY-MM-DD'),
+  data: IsoDate,
   righe: z.array(RigaSchema).min(1, 'Almeno una riga'),
   note: z.string().trim().optional().nullable(),
 });
@@ -326,7 +344,7 @@ export const ImportClienteSnapshot = z.object({
 export const ImportFatturaInput = z.object({
   tipoDocumento: TipoDocumentoEnum,
   numero: z.string(),
-  data: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  data: IsoDate,
   annoProgressivo: z.number().int(),
   progressivo: z.number().int(),
   numeroDisplay: z.string(),
@@ -335,8 +353,16 @@ export const ImportFatturaInput = z.object({
   marcaDaBollo: z.boolean(),
   modalitaPagamento: z.string().nullable().default(null),
   clienteSnapshot: ImportClienteSnapshot,
+  // Identificativi del CedentePrestatore estratti dall'XML (audit C3): il
+  // server li confronta con la P.IVA/CF del profilo per rifiutare l'import di
+  // fatture PASSIVE (di fornitori) come attive.
+  cedentePartitaIva: z.string().nullable().optional(),
+  cedenteCodiceFiscale: z.string().nullable().optional(),
 });
 
+// Envelope volutamente lasco (audit M15): la validazione di ogni item avviene
+// PER-ITEM nel route con ImportFatturaInput.safeParse — un item malformato
+// finisce nel report come errore, gli altri vengono importati.
 export const ImportXmlBody = z.object({
-  items: z.array(ImportFatturaInput).min(1).max(500),
+  items: z.array(z.unknown()).min(1).max(500),
 });

@@ -380,7 +380,7 @@ test('invia NC parziale → originale resta inviata', async () => {
   assert.equal(origAfter.stato, 'inviata');
 });
 
-test('GET /:id/xml — NC TD04 → XML TD04, importi negativi, DatiFattureCollegate', async () => {
+test('GET /:id/xml — NC TD04 → XML TD04, importi positivi, DatiFattureCollegate', async () => {
   const { app, db, headers, profileId } = await makeApp();
   await setCedente(db, profileId);
   const cId = await clienteCompleto(db, profileId);
@@ -390,7 +390,9 @@ test('GET /:id/xml — NC TD04 → XML TD04, importi negativi, DatiFattureColleg
   assert.equal(r.status, 200);
   const xml = await r.text();
   assert.match(xml, /<TipoDocumento>TD04<\/TipoDocumento>/);
-  assert.match(xml, /<ImponibileImporto>-1000\.00<\/ImponibileImporto>/);
+  // Importi SEMPRE positivi anche su TD04: la variazione è qualificata dal
+  // TipoDocumento, non dal segno (Guida AdE; cfr. fattura-xml.ts).
+  assert.match(xml, /<ImponibileImporto>1000\.00<\/ImponibileImporto>/);
   assert.match(xml, /<IdDocumento>2026\/1<\/IdDocumento>/);
 });
 

@@ -50,3 +50,20 @@ test('getInpsGsForYear: anno valido → params', () => {
   const p = getInpsGsForYear(2025);
   assert.equal(typeof p.massimale, 'number');
 });
+
+test('INPS_ARTCOM: fascia reddito aliquota maggiorata (art. 3-ter L. 438/1992) per anno', () => {
+  assert.equal(INPS_ARTCOM[2024]?.fasciaRedditoAliquotaMaggiorata, 55008);
+  assert.equal(INPS_ARTCOM[2025]?.fasciaRedditoAliquotaMaggiorata, 55448);
+});
+
+test('INPS_ARTCOM: aliquote oltre fascia = aliquota base + 1 p.p. esatto', () => {
+  for (const year of [2024, 2025]) {
+    const p = INPS_ARTCOM[year];
+    assert.ok(p, `${year} deve esistere`);
+    assert.equal(p.aliquotaArtigianoOltreFascia, 0.25);
+    assert.equal(p.aliquotaCommercianteOltreFascia, 0.2548);
+    // La fascia deve stare strettamente fra minimale e massimale.
+    assert.ok(p.fasciaRedditoAliquotaMaggiorata > p.minimaleAnnuo);
+    assert.ok(p.fasciaRedditoAliquotaMaggiorata < p.massimale);
+  }
+});

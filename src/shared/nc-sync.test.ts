@@ -1,7 +1,7 @@
 // src/shared/nc-sync.test.ts
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeStorno, isNCDateValid } from './nc-sync';
+import { computeStorno, isNCDateValid, isOverStorno } from './nc-sync';
 
 function base(over = {}) {
   return {
@@ -64,6 +64,16 @@ test('computeStorno — arrotondamento 2 decimali (3*33.333=99.999→100)', () =
   const r = computeStorno(base({ originaleImporto: 100, ncImporto: 99.999 }));
   assert.equal(r.ncTotaleImporto, 100);
   assert.equal(r.tipoStorno, 'totale');
+});
+
+test('isOverStorno — blocca oltre il residuo, tolleranza 0,01 (art. 26 DPR 633/72)', () => {
+  assert.equal(isOverStorno(1000, 0, 1200), true);    // singola eccedente
+  assert.equal(isOverStorno(1000, 0, 1000), false);   // storno totale ok
+  assert.equal(isOverStorno(1000, 0, 1000.01), false); // entro tolleranza
+  assert.equal(isOverStorno(1000, 0, 1000.02), true);
+  assert.equal(isOverStorno(1000, 600, 600), true);   // cumulato 1200 > 1000
+  assert.equal(isOverStorno(1000, 600, 400), false);  // cumulato esatto
+  assert.equal(isOverStorno(1000, 600, -400), false); // importo NC in valore assoluto
 });
 
 test('isNCDateValid — NC >= originale', () => {

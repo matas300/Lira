@@ -1,10 +1,12 @@
 // src/shared/fattura-xml.ts
 //
-// Generatore FatturaPA v1.2 (TD01) puro — port audit-hardened da CalcoliVari
+// Generatore FatturaPA v1.2 (TD01/TD04) puro — port audit-hardened da CalcoliVari
 // (fatture-xml-helpers.js + fatture-docs-feature.js). Nessuna dipendenza DOM/DB.
-// Solo TD01 (no note di credito): importi sempre positivi.
+// Importi SEMPRE positivi anche per TD04: per la Guida AdE alla compilazione
+// della FatturaPA è il TipoDocumento a qualificare la variazione (nota di
+// credito), non il segno degli importi.
 
-import { SOGLIA_BOLLO } from './fattura-logic';
+import { SOGLIA_BOLLO, DICITURA_FORFETTARIO } from './fattura-logic';
 import { isValidPartitaIvaIT, isValidCodiceFiscaleFormat } from './validators';
 import type { Cedente } from './cedente';
 
@@ -132,6 +134,13 @@ function s(v: unknown): string {
 /** Validazione fail-fast della fattura per l'XML. Ritorna [] se ok. */
 export function validateFatturaForXml(input: FatturaXmlInput): string[] {
   const errors: string[] = [];
+  // Fail-fast regime: il builder emette una struttura forfettaria (Natura N2.2,
+  // dicitura L. 190/2014, nessun DatiRitenuta/IVA). Con RF01 l'XML sarebbe
+  // fiscalmente sbagliato pur passando l'XSD: blocchiamo finché il regime
+  // ordinario non sarà implementato.
+  if (input.cedente.regime !== 'forfettario') {
+    errors.push('Export XML supportato solo per il regime forfettario: il regime ordinario (RF01, IVA/ritenuta) non è ancora implementato.');
+  }
   if (!input.numero) errors.push('Numero fattura mancante (la fattura deve essere inviata).');
   if (!input.data) errors.push('Data fattura mancante.');
   if (!(Number(input.importo) > 0)) errors.push('Importo totale della fattura pari a zero.');
@@ -153,6 +162,9 @@ export function validateFatturaForXml(input: FatturaXmlInput): string[] {
       const hasPiva = isValidPartitaIvaIT(s(c.partitaIva).replace(/\s+/g, ''));
       const hasCf = isValidCodiceFiscaleFormat(s(c.codiceFiscale).toUpperCase());
       if (!hasPiva && !hasCf) errors.push('Cliente IT senza P.IVA valida né Codice Fiscale: SdI rifiuterà l\'XML.');
+    } else if (!s(c.partitaIva).replace(/\s+/g, '') && !s(c.codiceFiscale)) {
+      // Senza IdFiscaleIVA il cessionario estero uscirebbe privo di identificativo → scarto SdI.
+      errors.push('Cliente estero senza identificativo fiscale (VAT/codice estero): SdI rifiuterà l\'XML.');
     }
     if (c.tipoCliente === 'PA' && !/^[A-Z0-9]{6}$/i.test(s(c.codiceSdi))) {
       errors.push('Cliente PA: il Codice IPA deve essere 6 caratteri alfanumerici (D.M. 55/2013 art. 2).');
@@ -161,15 +173,17 @@ export function validateFatturaForXml(input: FatturaXmlInput): string[] {
   return errors;
 }
 
-// ───── Builder XML TD01 ─────
+// ───── Builder XML TD01/TD04 ─────
 
-function buildDettaglioLinee(input: FatturaXmlInput, sign: number): { linee: string[]; rimborsoBollo: boolean } {
+// Importi sempre positivi anche su TD04 (Guida AdE: la variazione è qualificata
+// dal TipoDocumento, non dal segno). `isTD01` serve solo per il bollo.
+function buildDettaglioLinee(input: FatturaXmlInput, isTD01: boolean): { linee: string[]; rimborsoBollo: boolean } {
   let n = 0;
   const linee = input.righe.map((line) => {
     n++;
     const qta = parseMaybeNumber(line.quantita) || 1;
     const pu = round2(parseMaybeNumber(line.prezzoUnitario));
-    const tot = round2(qta * pu * sign);
+    const tot = round2(qta * pu);
     const desc = sanitizeXmlLatin1(line.descrizione || 'Prestazione professionale').slice(0, 1000);
     return '    <DettaglioLinee>\n'
       + '      <NumeroLinea>' + n + '</NumeroLinea>\n'
@@ -181,8 +195,8 @@ function buildDettaglioLinee(input: FatturaXmlInput, sign: number): { linee: str
       + '      <Natura>N2.2</Natura>\n'
       + '    </DettaglioLinee>';
   });
-  // Rimborso bollo solo su TD01 (sign=1) con bollo addebitato sopra soglia.
-  const rimborsoBollo = sign === 1 && input.marcaDaBollo && input.bolloAddebitato && round2(input.importo) > SOGLIA_BOLLO;
+  // Rimborso bollo solo su TD01 con bollo addebitato sopra soglia (mai su TD04).
+  const rimborsoBollo = isTD01 && input.marcaDaBollo && input.bolloAddebitato && round2(input.importo) > SOGLIA_BOLLO;
   if (rimborsoBollo) {
     n++;
     linee.push('    <DettaglioLinee>\n'
@@ -238,7 +252,7 @@ export function buildFatturaXml(input: FatturaXmlInput): string {
   const ced = input.cedente;
   const c = input.cliente;
   const tipoDoc = input.tipoDocumento || 'TD01';
-  const sign = tipoDoc === 'TD04' ? -1 : 1;
+  const isTD01 = tipoDoc !== 'TD04';
   const regimeFiscale = regimeToRF(ced.regime);
   const progressivo = sanitizeProgressivoInvio(input.numero);
   const piva = s(ced.partitaIva).replace(/\s+/g, '');
@@ -252,6 +266,9 @@ export function buildFatturaXml(input: FatturaXmlInput): string {
   const naz = (s(c.nazione) || 'IT').slice(0, 2).toUpperCase();
   const estero = naz !== 'IT';
   const isPA = c.tipoCliente === 'PA';
+  // PA → FPA12 (versione + FormatoTrasmissione), privati → FPR12. Un FPR12
+  // verso CodiceDestinatario IPA a 6 char viene scartato da SdI (00427).
+  const formatoTrasmissione = isPA ? 'FPA12' : 'FPR12';
   const pivaCli = s(c.partitaIva).replace(/\s+/g, '');
   const codiceSDI = estero
     ? 'XXXXXXX'
@@ -260,19 +277,23 @@ export function buildFatturaXml(input: FatturaXmlInput): string {
         : (isValidPartitaIvaIT(pivaCli)
             ? (s(c.codiceSdi) || '0000000').padEnd(7, '0').slice(0, 7)
             : (s(c.codiceSdi) || '0000000')));
+  // PECDestinatario solo con CodiceDestinatario '0000000' e PEC nello snapshot.
+  const pecDest = (!estero && !isPA && codiceSDI === '0000000') ? sanitizeXmlLatin1(s(c.pec)).slice(0, 256) : '';
+  const pecDestXml = pecDest ? `\n      <PECDestinatario>${xmlEscape(pecDest)}</PECDestinatario>` : '';
 
   const imponibile = round2(input.importo);
   const naturaLinea = 'N2.2';
-  const riferimentoNormativo = "Regime forfettario: operazione in franchigia IVA e senza ritenuta d'acconto Art.1 c.54-89 L.190/2014";
+  const riferimentoNormativo = DICITURA_FORFETTARIO;
 
-  const { linee, rimborsoBollo } = buildDettaglioLinee(input, sign);
+  const { linee, rimborsoBollo } = buildDettaglioLinee(input, isTD01);
 
-  const datiBollo = (sign === 1 && input.marcaDaBollo && imponibile > SOGLIA_BOLLO)
+  // DatiBollo mai su TD04: niente bollo sulle note di credito (coerente con isBolloDovuto).
+  const datiBollo = (isTD01 && input.marcaDaBollo && imponibile > SOGLIA_BOLLO)
     ? '\n      <DatiBollo>\n        <BolloVirtuale>SI</BolloVirtuale>\n        <ImportoBollo>2.00</ImportoBollo>\n      </DatiBollo>'
     : '';
 
   // DatiGeneraliDocumento — ordine XSD: TipoDocumento, Divisa, Data, Numero, DatiBollo, ImportoTotaleDocumento
-  const importoTotale = round2((input.importo + (rimborsoBollo ? 2 : 0)) * sign);
+  const importoTotale = round2(input.importo + (rimborsoBollo ? 2 : 0));
   const dggParts: string[] = [];
   dggParts.push('<TipoDocumento>' + tipoDoc + '</TipoDocumento>');
   dggParts.push('<Divisa>EUR</Divisa>');
@@ -293,8 +314,10 @@ export function buildFatturaXml(input: FatturaXmlInput): string {
   const cfCedenteXml = cf ? '\n        <CodiceFiscale>' + xmlEscape(cf) + '</CodiceFiscale>' : '';
 
   const cliInd = xmlEscape(sanitizeXmlLatin1(c.indirizzo || '').slice(0, 60));
+  // CAP estero: lo schema CAPType è [0-9]{5}; un CAP come "SW1A 1AA" verrebbe
+  // mutilato in modo fuorviante → per nazione != IT usiamo '00000' fisso.
   const cliCap = estero
-    ? (s(c.cap).replace(/\D/g, '').padStart(5, '0').slice(0, 5) || '00000')
+    ? '00000'
     : s(c.cap).replace(/\D/g, '').padStart(5, '0').slice(0, 5);
   const cliCom = xmlEscape(sanitizeXmlLatin1(c.citta || '').slice(0, 60));
   const cliProv = estero ? '' : s(c.provincia).slice(0, 2).toUpperCase();
@@ -305,12 +328,12 @@ export function buildFatturaXml(input: FatturaXmlInput): string {
       <CondizioniPagamento>TP02</CondizioniPagamento>
       <DettaglioPagamento>
         <ModalitaPagamento>${modalitaToCodiceMP(input.modalitaPagamento)}</ModalitaPagamento>
-        <ImportoPagamento>${fmtXmlNum(round2(importoTotale - (Number(input.ritenuta) || 0) * sign))}</ImportoPagamento>
+        <ImportoPagamento>${fmtXmlNum(round2(importoTotale - (Number(input.ritenuta) || 0)))}</ImportoPagamento>
       </DettaglioPagamento>
     </DatiPagamento>`;
 
   return `<?xml version="1.0" encoding="UTF-8"?>
-<p:FatturaElettronica versione="FPR12"
+<p:FatturaElettronica versione="${formatoTrasmissione}"
   xmlns:p="${XML_NAMESPACE}"
   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
   xsi:schemaLocation="${XML_NAMESPACE} http://www.fatturapa.gov.it/export/fatturazione/sdi/fatturapa/v1.2/Schema_del_file_xml_FatturaPA_versione_1.2.xsd">
@@ -321,8 +344,8 @@ export function buildFatturaXml(input: FatturaXmlInput): string {
         <IdCodice>${xmlEscape(trasmittenteIdCodice)}</IdCodice>
       </IdTrasmittente>
       <ProgressivoInvio>${progressivo}</ProgressivoInvio>
-      <FormatoTrasmissione>FPR12</FormatoTrasmissione>
-      <CodiceDestinatario>${codiceSDI}</CodiceDestinatario>
+      <FormatoTrasmissione>${formatoTrasmissione}</FormatoTrasmissione>
+      <CodiceDestinatario>${xmlEscape(codiceSDI)}</CodiceDestinatario>${pecDestXml}
     </DatiTrasmissione>
     <CedentePrestatore>
       <DatiAnagrafici>
@@ -340,7 +363,7 @@ export function buildFatturaXml(input: FatturaXmlInput): string {
         <Indirizzo>${cedInd}</Indirizzo>
         <CAP>${cedCap}</CAP>
         <Comune>${cedCom}</Comune>${cedProvXml}
-        <Nazione>${ced.nazione}</Nazione>
+        <Nazione>${xmlEscape(ced.nazione)}</Nazione>
       </Sede>
     </CedentePrestatore>
     <CessionarioCommittente>
@@ -353,7 +376,7 @@ export function buildFatturaXml(input: FatturaXmlInput): string {
         <Indirizzo>${cliInd}</Indirizzo>
         <CAP>${cliCap}</CAP>
         <Comune>${cliCom}</Comune>${cliProvXml}
-        <Nazione>${naz}</Nazione>
+        <Nazione>${xmlEscape(naz)}</Nazione>
       </Sede>
     </CessionarioCommittente>
   </FatturaElettronicaHeader>
@@ -366,7 +389,7 @@ ${linee.join('\n')}
       <DatiRiepilogo>
         <AliquotaIVA>0.00</AliquotaIVA>
         <Natura>${naturaLinea}</Natura>
-        <ImponibileImporto>${fmtXmlNum(round2(imponibile * sign))}</ImponibileImporto>
+        <ImponibileImporto>${fmtXmlNum(imponibile)}</ImponibileImporto>
         <Imposta>0.00</Imposta>
         <RiferimentoNormativo>${xmlEscape(riferimentoNormativo)}</RiferimentoNormativo>
       </DatiRiepilogo>${rimborsoBollo ? `

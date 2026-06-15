@@ -104,6 +104,25 @@ test('validateFatturaForXml — sede cliente incompleta -> errore', () => {
   assert.ok(errs.some((e) => /CAP/i.test(e)));
 });
 
+test('validateFatturaForXml — regime ordinario -> fail-fast (export non supportato)', () => {
+  const errs = validateFatturaForXml({ ...inputBase(), cedente: { ...cedenteX, regime: 'ordinario' as const } });
+  assert.ok(errs.some((e) => /solo per il regime forfettario/i.test(e)));
+});
+
+test('validateFatturaForXml — cliente estero senza identificativo fiscale -> errore', () => {
+  const errs = validateFatturaForXml({
+    ...inputBase(),
+    cliente: { ...clienteIT, tipoCliente: 'Estero', nazione: 'DE', partitaIva: null, codiceFiscale: null },
+  });
+  assert.ok(errs.some((e) => /estero senza identificativo/i.test(e)));
+  // con VAT estera passa
+  const ok = validateFatturaForXml({
+    ...inputBase(),
+    cliente: { ...clienteIT, tipoCliente: 'Estero', nazione: 'DE', partitaIva: 'DE123456789', codiceFiscale: null },
+  });
+  assert.deepEqual(ok, []);
+});
+
 // ───── buildFatturaXml (Task 4) ─────
 import { buildFatturaXml } from './fattura-xml';
 
@@ -135,18 +154,40 @@ test('buildFatturaXml — cedente IdTrasmittente usa CF per persona fisica', () 
   assert.match(xml, /<IdTrasmittente>\s*<IdPaese>IT<\/IdPaese>\s*<IdCodice>RSSMRA80A01H501U<\/IdCodice>/);
 });
 
-test('buildFatturaXml — cliente PA usa IPA 6; estero senza DatiPagamento', () => {
+test('buildFatturaXml — cliente PA: FPA12 (versione + FormatoTrasmissione) e IPA 6; estero senza DatiPagamento', () => {
+  // Audit C1: PA con FormatoTrasmissione FPR12 → scarto SdI 00427.
   const pa = buildFatturaXml({ ...inputBase(), cliente: { ...inputBase().cliente, tipoCliente: 'PA', codiceSdi: 'UF1234' } });
   assert.match(pa, /<CodiceDestinatario>UF1234<\/CodiceDestinatario>/);
+  assert.match(pa, /versione="FPA12"/);
+  assert.match(pa, /<FormatoTrasmissione>FPA12<\/FormatoTrasmissione>/);
+  assert.ok(!/FPR12/.test(pa), 'XML PA non deve contenere FPR12');
 
   const estero = buildFatturaXml({
     ...inputBase(),
     cliente: { nome: 'Foreign Co', tipoCliente: 'Estero', partitaIva: 'DE123', codiceFiscale: null,
-      codiceSdi: '', pec: null, indirizzo: 'Strasse 1', cap: '10115', citta: 'Berlin', provincia: '', nazione: 'DE' },
+      codiceSdi: '', pec: null, indirizzo: 'Strasse 1', cap: 'SW1A 1AA', citta: 'Berlin', provincia: '', nazione: 'DE' },
   });
   assert.match(estero, /<CodiceDestinatario>XXXXXXX<\/CodiceDestinatario>/);
   assert.match(estero, /<Nazione>DE<\/Nazione>/);
+  // CAP estero non numerico → '00000' fisso (CAPType [0-9]{5}), niente mutilazioni tipo '00011'.
+  assert.match(estero, /<CAP>00000<\/CAP>/);
   assert.ok(!/<DatiPagamento>/.test(estero));
+});
+
+test('buildFatturaXml — privato non-PA resta FPR12', () => {
+  const xml = buildFatturaXml(inputBase());
+  assert.match(xml, /versione="FPR12"/);
+  assert.match(xml, /<FormatoTrasmissione>FPR12<\/FormatoTrasmissione>/);
+});
+
+test('buildFatturaXml — PECDestinatario emesso con SDI 0000000 e pec presente', () => {
+  const conPec = buildFatturaXml({ ...inputBase(), cliente: { ...inputBase().cliente, pec: 'acme@pec.it' } });
+  assert.match(conPec, /<CodiceDestinatario>0000000<\/CodiceDestinatario>\s*<PECDestinatario>acme@pec\.it<\/PECDestinatario>/);
+  // con codice SDI reale niente PECDestinatario
+  const conSdi = buildFatturaXml({ ...inputBase(), cliente: { ...inputBase().cliente, pec: 'acme@pec.it', codiceSdi: 'ABC1234' } });
+  assert.ok(!/<PECDestinatario>/.test(conSdi));
+  // senza pec niente PECDestinatario (golden invariato)
+  assert.ok(!/<PECDestinatario>/.test(buildFatturaXml(inputBase())));
 });
 
 test('buildFatturaXml — rimborso bollo addebitato -> riga + DatiRiepilogo N1', () => {
@@ -157,7 +198,9 @@ test('buildFatturaXml — rimborso bollo addebitato -> riga + DatiRiepilogo N1',
 
 // ───── TD04 (Slice 5C) ─────
 
-test('buildFatturaXml — TD04: importi negativi + DatiFattureCollegate', () => {
+test('buildFatturaXml — TD04: importi POSITIVI (Guida AdE) + DatiFattureCollegate', () => {
+  // La variazione è qualificata dal TipoDocumento TD04, non dal segno degli
+  // importi: la Guida AdE alla compilazione vuole importi positivi.
   const xml = buildFatturaXml({
     ...inputBase(),
     tipoDocumento: 'TD04',
@@ -165,11 +208,23 @@ test('buildFatturaXml — TD04: importi negativi + DatiFattureCollegate', () => 
     marcaDaBollo: false,
   });
   assert.match(xml, /<TipoDocumento>TD04<\/TipoDocumento>/);
-  assert.match(xml, /<PrezzoTotale>-1000\.00<\/PrezzoTotale>/);
-  assert.match(xml, /<ImponibileImporto>-1000\.00<\/ImponibileImporto>/);
-  assert.match(xml, /<ImportoTotaleDocumento>-1000\.00<\/ImportoTotaleDocumento>/);
+  assert.match(xml, /<PrezzoTotale>1000\.00<\/PrezzoTotale>/);
+  assert.match(xml, /<ImponibileImporto>1000\.00<\/ImponibileImporto>/);
+  assert.match(xml, /<ImportoTotaleDocumento>1000\.00<\/ImportoTotaleDocumento>/);
+  assert.ok(!/-1000\.00/.test(xml), 'TD04 non deve contenere importi negativi');
   assert.match(xml, /<DatiFattureCollegate>\s*<RiferimentoNumeroLinea>1<\/RiferimentoNumeroLinea>\s*<IdDocumento>2026\/1<\/IdDocumento>\s*<Data>2026-03-01<\/Data>\s*<\/DatiFattureCollegate>/);
   assert.ok(!/<DatiBollo>/.test(xml));
+});
+
+test('buildFatturaXml — TD04: mai DatiBollo né rimborso bollo anche con flag attivi', () => {
+  const xml = buildFatturaXml({
+    ...inputBase(),
+    tipoDocumento: 'TD04',
+    fatturaOriginale: { numero: '2026/1', data: '2026-03-01' },
+    marcaDaBollo: true, bolloAddebitato: true,
+  });
+  assert.ok(!/<DatiBollo>/.test(xml));
+  assert.ok(!/Rimborso imposta di bollo/.test(xml));
 });
 
 test('buildFatturaXml — TD04: DatiFattureCollegate dopo DatiGeneraliDocumento (ordine XSD)', () => {
@@ -214,7 +269,9 @@ test('GOLDEN — XML TD01 forfettario byte-identico al riferimento', () => {
   assert.equal(buildFatturaXml(goldenInput), golden);
 });
 
-test('GOLDEN — XML TD04 byte-identico al riferimento', () => {
+// Fixture rigenerata (audit FatturaPA 2026-06): importi TD04 ora POSITIVI come
+// da Guida AdE — il segno non qualifica la variazione, lo fa il TipoDocumento.
+test('GOLDEN — XML TD04 byte-identico al riferimento (importi positivi)', () => {
   const golden = readFileSync(new URL('./__fixtures__/nota-credito-golden.xml', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
   const input: FatturaXmlInput = {
     cedente: { partitaIva: '00743110157', codiceFiscale: 'RSSMRA80A01H501U', nome: 'Mario', cognome: 'Rossi',

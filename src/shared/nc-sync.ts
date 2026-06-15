@@ -53,6 +53,18 @@ export function computeStorno(input: StornoInput): StornoResult {
   return { applied: !already, tipoStorno, ncIds, ncTotaleImporto, stato };
 }
 
+/**
+ * true se aggiungere `ncImporto` agli storni già accumulati supererebbe
+ * l'importo della fattura originale (tolleranza 0,01 €). Una NC non può
+ * stornare più di quanto fatturato (art. 26 DPR 633/72). Usata sia alla
+ * CREAZIONE della NC sia DENTRO la transazione di /invia (due NC parziali
+ * concorrenti non devono cumulare oltre il totale).
+ */
+export function isOverStorno(originaleImporto: number, ncTotaleEsistente: number, ncImporto: number): boolean {
+  const cum = round2((Number(ncTotaleEsistente) || 0) + Math.abs(Number(ncImporto) || 0));
+  return cum > round2(Number(originaleImporto) || 0) + TOLLERANZA_TOTALE;
+}
+
 /** data NC >= data originale (ISO YYYY-MM-DD). true se una delle due manca. */
 export function isNCDateValid(dataNC: string | null | undefined, dataOriginale: string | null | undefined): boolean {
   if (!dataNC || !dataOriginale) return true;

@@ -31,6 +31,12 @@ test('isBolloDovuto — forfettario e imponibile > 77,47 (strict)', () => {
   assert.equal(SOGLIA_BOLLO, 77.47);
 });
 
+test('isBolloDovuto — mai su TD04 (policy: niente bollo sulle note di credito)', () => {
+  assert.equal(isBolloDovuto('forfettario', 1000, 'TD04'), false);
+  assert.equal(isBolloDovuto('forfettario', 1000, 'TD01'), true);
+  assert.equal(isBolloDovuto('forfettario', 1000), true); // default TD01
+});
+
 test('validateRitenutaForfettario — blocca ritenuta>0 in forfettario', () => {
   assert.equal(validateRitenutaForfettario('forfettario', 50) !== null, true);
   assert.equal(validateRitenutaForfettario('forfettario', 0), null);
