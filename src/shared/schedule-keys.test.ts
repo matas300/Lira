@@ -29,6 +29,6 @@ test('parseScheduleKey: family sconosciuta → null', () => {
   assert.equal(parseScheduleKey('inesistente_2025'), null);
 });
 
-test('SCHEDULE_FAMILIES contiene 14 voci (13 attive + INAIL stub)', () => {
-  assert.equal(SCHEDULE_FAMILIES.length, 14);
+test('SCHEDULE_FAMILIES contiene 15 voci (14 attive + INAIL stub)', () => {
+  assert.equal(SCHEDULE_FAMILIES.length, 15);
 });

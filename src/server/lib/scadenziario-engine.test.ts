@@ -70,29 +70,43 @@ function baseInput(over: Partial<ScadenziarioInput> = {}): ScadenziarioInput {
       previsionale: makeScenario({ method: 'previsionale' }),
     },
     paymentsByKey: new Map(),
-    bolloByQuarter: { q123: 16, q4: 8 },
+    bolloByQuarter: { q12: 10, q3: 6, q4: 8 },
     cameraCommerce: 53,
     ...over,
   };
 }
 
-test('buildScadenziario: produce 13 righe (esclusa INAIL)', () => {
+test('buildScadenziario: produce 14 righe (esclusa INAIL)', () => {
   const out = buildScadenziario(baseInput());
-  assert.equal(out.rows.length, 13);
+  assert.equal(out.rows.length, 14);
 });
 
-test('buildScadenziario: include tutte le 13 scheduleKey attese', () => {
+test('buildScadenziario: include tutte le 14 scheduleKey attese', () => {
   const out = buildScadenziario(baseInput());
   const ids = new Set(out.rows.map((r) => r.id));
   for (const k of [
     'imposta_saldo_2025', 'imposta_acc1_2026', 'imposta_acc2_2026',
     'contributi_saldo_2025', 'contributi_acc1_2026', 'contributi_acc2_2026',
     'inps_fissi_1_2026', 'inps_fissi_2_2026', 'inps_fissi_3_2026', 'inps_fissi_4_2026',
-    'bollo_q123_2026', 'bollo_q4_2026',
+    'bollo_q12_2026', 'bollo_q3_2026', 'bollo_q4_2026',
     'camera_2025',
   ]) {
     assert.ok(ids.has(k), `manca ${k}`);
   }
+});
+
+test('bollo: Q1+Q2 scade 30/09 (rolled), Q3 scade 30/11 (rolled), Q4 28/02/N+1', () => {
+  const out = buildScadenziario(baseInput({ year: 2026 }));
+  const map = new Map(out.rows.map((r) => [r.id, r]));
+  // Q1+Q2 → 30/09 (semplificazione ≤5.000 €: Q1 differito + Q2)
+  assert.equal(map.get('bollo_q12_2026')?.dueDateOriginal, '2026-09-30');
+  assert.equal(map.get('bollo_q12_2026')?.amount.point, 10);
+  // Q3 (lug–set) → scadenza legale 30/11, NON 30/09
+  assert.equal(map.get('bollo_q3_2026')?.dueDateOriginal, '2026-11-30');
+  assert.equal(map.get('bollo_q3_2026')?.amount.point, 6);
+  // Q4 → 28/02 dell'anno successivo
+  assert.equal(map.get('bollo_q4_2026')?.dueDateOriginal, '2027-02-28');
+  assert.equal(map.get('bollo_q4_2026')?.amount.point, 8);
 });
 
 test('FIX A5: prorogaSaldoAt propaga su saldo, acc1, camera ma NON acc2/fissi', () => {
@@ -120,8 +134,8 @@ test('FIX A5: prorogaSaldoAt propaga su saldo, acc1, camera ma NON acc2/fissi', 
   assert.equal(map.get('contributi_acc2_2026')?.prorogaApplied, false);
   assert.notEqual(map.get('inps_fissi_2_2026')?.dueDate, '2026-07-30');
   assert.equal(map.get('inps_fissi_2_2026')?.prorogaApplied, false);
-  assert.notEqual(map.get('bollo_q123_2026')?.dueDate, '2026-07-30');
-  assert.equal(map.get('bollo_q123_2026')?.prorogaApplied, false);
+  assert.notEqual(map.get('bollo_q12_2026')?.dueDate, '2026-07-30');
+  assert.equal(map.get('bollo_q12_2026')?.prorogaApplied, false);
 });
 
 test('FIX A5: prorogaSaldoAt aggiunge warning A5_PROROGA_APPLICATA (info)', () => {
@@ -260,7 +274,7 @@ test('scenario method=previsionale → certainty=forecast sulle righe tax/contri
   const saldo = out.rows.find((r) => r.id === 'imposta_saldo_2025');
   assert.equal(saldo?.certainty, 'forecast');
   // mentre bollo/camera/fissi restano official
-  assert.equal(out.rows.find((r) => r.id === 'bollo_q123_2026')?.certainty, 'official');
+  assert.equal(out.rows.find((r) => r.id === 'bollo_q12_2026')?.certainty, 'official');
   assert.equal(out.rows.find((r) => r.id === 'camera_2025')?.certainty, 'official');
 });
 

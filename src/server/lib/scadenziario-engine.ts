@@ -1,7 +1,7 @@
 // src/server/lib/scadenziario-engine.ts
 //
 // Motore puro che assembla il calendario fiscale forfettario dell'anno N:
-// 13 righe (3 sostitutiva + 3 contributi variabili + 4 INPS fissi + 2 bollo
+// 14 righe (3 sostitutiva + 3 contributi variabili + 4 INPS fissi + 3 bollo
 // + 1 camera commercio; INAIL omessa in 2A) con date, importi, certainty,
 // payment linkage, status e explanation.
 //
@@ -74,7 +74,7 @@ export interface ScadenziarioInput {
   previousYearSettings: ScadenziarioInput['yearSettings'] | null;
   scenarios: { historical: ForfettarioScenario; previsionale: ForfettarioScenario };
   paymentsByKey: Map<string, { paidTotal: number; payments: PaymentBreakdown[] }>;
-  bolloByQuarter: { q123: number; q4: number };
+  bolloByQuarter: { q12: number; q3: number; q4: number };
   cameraCommerce: number;
 }
 
@@ -284,14 +284,26 @@ function buildSeeds(input: ScadenziarioInput): RowSeed[] {
       certainty: 'official',
     },
 
-    // Bollo fattura elettronica.
+    // Bollo fattura elettronica (DM 17/06/2014, soglia 5.000 € DL 73/2022).
+    // Q1+Q2 → 30/09 (Q1 differito sotto soglia + II trimestre); Q3 → 30/11
+    // (scadenza legale del III trimestre, NON anticipabile al 30/09 quando il
+    // trimestre non è ancora chiuso); Q4 → 28/02 N+1.
     {
-      family: 'bollo_q123',
+      family: 'bollo_q12',
       competenceYear: year,
       dueDateBase: `${year}-09-30`,
-      title: 'Imposta di bollo — Q1+Q2+Q3',
+      title: 'Imposta di bollo — Q1+Q2',
       kind: 'tax',
-      amount: fixedPoint(input.bolloByQuarter.q123),
+      amount: fixedPoint(input.bolloByQuarter.q12),
+      certainty: 'official',
+    },
+    {
+      family: 'bollo_q3',
+      competenceYear: year,
+      dueDateBase: `${year}-11-30`,
+      title: 'Imposta di bollo — Q3',
+      kind: 'tax',
+      amount: fixedPoint(input.bolloByQuarter.q3),
       certainty: 'official',
     },
     {
@@ -377,8 +389,8 @@ function resolveDueDate(
  * function: ricomputabile a piacere dal service o dal frontend mock.
  *
  * Output:
- * - `rows`: 13 righe, ordine canonico (saldo/acc1/acc2 sostitutiva, idem
- *   contributi variabili, 4 fissi INPS, 2 bollo, 1 camera).
+ * - `rows`: 14 righe, ordine canonico (saldo/acc1/acc2 sostitutiva, idem
+ *   contributi variabili, 4 fissi INPS, 3 bollo, 1 camera).
  * - `summary.nextDue`: prima riga non ancora interamente pagata ordinata
  *   per `dueDate` ascendente.
  * - `warnings`: include solo i warning derivati dallo scheduling (al

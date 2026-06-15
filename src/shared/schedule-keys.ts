@@ -6,7 +6,7 @@
 // Formato chiave: `<family>_<year>`, es. `imposta_saldo_2025`,
 // `inps_fissi_3_2025`. Il year è sempre a 4 cifre.
 //
-// Famiglie (14 totali):
+// Famiglie (15 totali):
 // - Imposte sui redditi (saldo + 2 acconti): regole acconti art. 17 c. 3
 //   DPR 435/2001, scadenza saldo + 1° acconto 30/06 (o 30/07 con +0,40%),
 //   2° acconto 30/11.
@@ -14,10 +14,11 @@
 //   date dei tributi.
 // - INPS fissi (4 rate trimestrali artigiani/commercianti): 16/05, 20/08,
 //   16/11, 16/02 dell'anno successivo (Circolare INPS annuale).
-// - Bollo fatturazione elettronica (DM 17/06/2014): rata Q1+Q2+Q3 (31/05
-//   dell'anno successivo) e rata Q4 (28/02 dell'anno successivo). Soglia
-//   minima cumulativa 5.000 € per posticipo Q1/Q2; sotto soglia tutto in
-//   rata unica (DM 4/12/2020).
+// - Bollo fatturazione elettronica (DM 17/06/2014, soglia 5.000 € DL 73/2022):
+//   tre rate per l'anno N — Q1+Q2 (30/09: Q1 differito sotto soglia + Q2),
+//   Q3 (30/11, scadenza legale del III trimestre) e Q4 (28/02 dell'anno
+//   successivo). Sotto la soglia cumulativa di 5.000 € Q1 si versa col II
+//   trimestre; il III trimestre resta comunque al 30/11.
 // - Diritto camerale CCIAA: scadenza allineata al 1° acconto imposte.
 // - INAIL (stub per estensione futura, attualmente non gestito da Lira ma
 //   presente per evitare break del catalogo quando verrà introdotto).
@@ -33,7 +34,8 @@ export const SCHEDULE_FAMILIES = [
   'inps_fissi_2',
   'inps_fissi_3',
   'inps_fissi_4',
-  'bollo_q123',
+  'bollo_q12',
+  'bollo_q3',
   'bollo_q4',
   'camera',
   'inail',

@@ -6,7 +6,7 @@
 // via `requireSession`, delega al service.
 //
 // Risposte:
-//   200 → `ScadenziarioView` (13 righe + methodComparison + transition + warnings + rulesRef)
+//   200 → `ScadenziarioView` (14 righe + methodComparison + transition + warnings + rulesRef)
 //   400 → INVALID_YEAR (param non parseabile o fuori range 2000-2100)
 //   401 → UNAUTHENTICATED (middleware `requireSession`)
 //   404 → YEAR_SETTINGS_NOT_FOUND (sollevato dal service)

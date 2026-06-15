@@ -42,7 +42,17 @@ taxRoute.use('*', requireSession);
 
 taxRoute.get('/rules', (c) => {
   const yearQ = c.req.query('year');
-  const year = yearQ ? parseInt(yearQ, 10) : new Date().getUTCFullYear();
+  // year opzionale: se assente → anno corrente. Se presente deve essere un
+  // intero 2000-2100 (un anno mancante in tabella resta lecito → null nel body,
+  // by design; un anno NON parseabile è invece un input errato → 400).
+  let year = new Date().getUTCFullYear();
+  if (yearQ !== undefined) {
+    const parsed = Number(yearQ);
+    if (!Number.isInteger(parsed) || parsed < 2000 || parsed > 2100) {
+      throw new HttpError(400, 'INVALID_YEAR', `Anno "${yearQ}" non valido: atteso un intero tra 2000 e 2100.`);
+    }
+    year = parsed;
+  }
   return c.json({
     year,
     inpsArtcom: INPS_ARTCOM[year] ?? null,
@@ -94,7 +104,6 @@ taxRoute.post('/simulate', zValidator('json', TaxSimulateInput), (c) => {
     previousContributionAccontiPaid: 0,
     accontiSostitutivaPagatiReali: 0,
     accontiContribPagatiReali: 0,
-    forecastContributionBase: body.grossCollected * coefficiente,
   });
   return c.json(scenario);
 });

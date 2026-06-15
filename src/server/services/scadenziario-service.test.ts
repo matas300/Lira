@@ -2,7 +2,7 @@
 //
 // Integrazione service ↔ DB. Verifica che `buildScadenziarioView`:
 // - Carichi correttamente year_settings e profilo.
-// - Costruisca le 13 righe canoniche dello scadenziario.
+// - Costruisca le 14 righe canoniche dello scadenziario.
 // - Calcoli `accontiSostitutivaPagatiReali` da pagamenti.scheduleKey (FIX A6).
 // - Aggreghi i warning runtime (audit-checks) sopra ai warning di engine.
 // - Throw `HttpError(404, 'YEAR_SETTINGS_NOT_FOUND')` quando l'anno non c'è.
@@ -63,10 +63,10 @@ async function setup() {
   return { db, profileId };
 }
 
-test('buildScadenziarioView: ritorna 13 righe per anno 2026', async () => {
+test('buildScadenziarioView: ritorna 14 righe per anno 2026', async () => {
   const { db, profileId } = await setup();
   const view = await buildScadenziarioView({ db, profileId, year: 2026 });
-  assert.equal(view.rows.length, 13);
+  assert.equal(view.rows.length, 14);
 });
 
 test('FIX A6: pagamento acc1 reale per sostitutiva 2025 produce saldo 2025 coerente', async () => {

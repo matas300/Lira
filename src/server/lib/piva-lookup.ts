@@ -9,6 +9,9 @@ import type { PivaLookupData, PivaLookupResult } from '@shared/types';
 
 type LookupCode = 'INVALID_PIVA' | 'NO_KEY' | 'NOT_FOUND' | 'NETWORK';
 
+/** Timeout della chiamata all'upstream openapi.com (ms). */
+const PIVA_LOOKUP_TIMEOUT_MS = 5000;
+
 interface LookupOpts {
   apiKey?: string;
   fetchImpl?: typeof fetch;
@@ -74,14 +77,19 @@ export async function lookupPartitaIva(piva: string, opts: LookupOpts): Promise<
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
   if (typeof fetchImpl !== 'function') return fail('NETWORK');
   try {
+    // Timeout esplicito: l'upstream esterno non deve poter bloccare a tempo
+    // indefinito uno slot di richiesta sulla VM Fly da 512MB. AbortSignal.timeout
+    // fa rigettare la fetch (→ catch → NETWORK) dopo PIVA_LOOKUP_TIMEOUT_MS.
     const res = await fetchImpl(`https://company.openapi.com/IT-start/${clean}`, {
       headers: { Authorization: `Bearer ${opts.apiKey}` },
+      signal: AbortSignal.timeout(PIVA_LOOKUP_TIMEOUT_MS),
     });
     if (res.status === 404) return fail('NOT_FOUND');
     if (!res.ok) return fail('NETWORK');
     const json = await res.json();
     return { ok: true, data: normalizeResponse(json) };
   } catch {
+    // Include AbortError/TimeoutError da AbortSignal.timeout.
     return fail('NETWORK');
   }
 }

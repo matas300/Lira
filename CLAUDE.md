@@ -142,7 +142,7 @@ Vedi anche `src/shared/forfettario-rules.ts` e `docs/data-model.md`. Lista di ri
 - **Imposta sostitutiva**: 15% standard / 5% startup primi 5 anni (art. 1 c. 65 L. 190/2014).
 - **INPS artigiani/commercianti**: 4 quote fisse + variabile su eccedente. Aliquota 24% / 24,48%. Riduzione 35% solo su comunicazione INPS entro 28/02.
 - **INPS Gestione Separata**: 26,07% (no altra cassa) / 24% (con altra cassa). Massimale 2025 ~120.607 €.
-- **Acconti** (art. 17 c. 3 DPR 435/2001): `<` 51,65 € no acconto; `51,65 ≤ imposta < 257,52` unico nov 100%; `≥ 257,52` split 40/60.
+- **Acconti** (art. 17 c. 3 DPR 435/2001): `<` 51,65 € no acconto; `51,65 ≤ imposta < 257,52` unico nov 100%; `≥ 257,52` split **50/50** (soggetti ISA, forfettari inclusi — art. 58 DL 124/2019 + Ris. AdE 93/E/2019; NON 40/60).
 - **Date scadenze**: saldo+1° acconto 30/6 (proroga eventuale a 31/7 o 30/7 con +0,40%), 2° acconto 30/11, INPS fissi 16/5-20/8-16/11-16/2, bollo trimestrale 31/5-30/9-30/11-28/2.
 - **FatturaPA v1.2**: TD01/TD04, RF19/RF01, N2.2 forfettario, soglia bollo 77,47 € strict, IPA 6 char alfanum, no ritenuta forfettario (art. 1 c. 67 L. 190/2014).
 - **Dichiarazione PF**: quadri LM/RR/RS/RX/RW. CE non scomputabile da forfettario (art. 165 TUIR).
