@@ -4,15 +4,10 @@ import { getMe } from './lib/auth';
 type PageModule = { mount: (container: HTMLElement) => () => void };
 
 const routes: Record<string, () => Promise<PageModule>> = {
-  // @ts-ignore — pages/login.ts created in T21
   '/login': () => import('./pages/login'),
-  // @ts-ignore — pages/dashboard.ts created in T22
   '/': () => import('./pages/dashboard'),
-  // @ts-ignore — pages/profiles.ts created in T23
   '/profiles': () => import('./pages/profiles'),
-  // @ts-ignore — pages/clienti.ts created in Slice 4A
   '/clienti': () => import('./pages/clienti'),
-  // @ts-ignore — pages/fatture.ts created in Slice 5A
   '/fatture': () => import('./pages/fatture'),
 };
 

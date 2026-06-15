@@ -2,7 +2,7 @@
 //
 // Endpoint GET /api/scadenziario/:year — thin wrapper su
 // `buildScadenziarioView`. I test coprono:
-//  - happy path (200, 13 righe canoniche per anno 2026)
+//  - happy path (200, 14 righe canoniche per anno 2026)
 //  - presenza dei campi addizionali della view (methodComparison, warnings, rulesRef)
 //  - 404 quando year_settings manca (l'errore arriva direttamente dal service)
 //  - 401 senza cookie di sessione (middleware `requireSession`)
@@ -72,12 +72,12 @@ async function setup() {
   return { app, headers: { cookie: `lira_session=${session.id}` } };
 }
 
-test('GET /api/scadenziario/2026 → 200 con 13 righe', async () => {
+test('GET /api/scadenziario/2026 → 200 con 14 righe', async () => {
   const { app, headers } = await setup();
   const r = await app.request('/api/scadenziario/2026', { headers });
   assert.equal(r.status, 200);
   const body = await r.json();
-  assert.equal(body.rows.length, 13);
+  assert.equal(body.rows.length, 14);
 });
 
 test('GET include methodComparison + warnings + rulesRef', async () => {

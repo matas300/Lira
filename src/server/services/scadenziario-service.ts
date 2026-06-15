@@ -259,19 +259,21 @@ async function loadPaymentsByKey(
 }
 
 /**
- * Calcola la marca da bollo dovuta divisa per "quarter aggregator": Q123 (mesi
- * 1-9) e Q4 (mesi 10-12). 2 € per ciascuna fattura con `marca_da_bollo=1` e
- * `data` nell'anno richiesto. La semplificazione "soglia 5k€" entro Q1/Q2
- * sarà gestita in 2B (qui Q123 collassa già a un'unica rata 30/09 → 31/05+1).
+ * Calcola la marca da bollo dovuta divisa per rata di versamento (DM
+ * 17/06/2014, soglia 5.000 € DL 73/2022): Q1+Q2 (mesi 1-6 → 30/09, col Q1
+ * differito sotto soglia), Q3 (mesi 7-9 → 30/11, scadenza legale del III
+ * trimestre) e Q4 (mesi 10-12 → 28/02 N+1). 2 € per ciascuna fattura con
+ * `marca_da_bollo=1` e `data` nell'anno richiesto.
  */
 async function loadBolloByQuarter(
   db: Db,
   profileId: string,
   year: number,
-): Promise<{ q123: number; q4: number }> {
+): Promise<{ q12: number; q3: number; q4: number }> {
   const rows = await db.select().from(fatture).where(eq(fatture.profileId, profileId));
   const prefix = `${year}-`;
-  let q123 = 0;
+  let q12 = 0;
+  let q3 = 0;
   let q4 = 0;
   for (const f of rows) {
     if (f.marcaDaBollo !== 1) continue;
@@ -280,13 +282,15 @@ async function loadBolloByQuarter(
     const monthStr = date.slice(5, 7);
     const month = parseInt(monthStr, 10);
     if (!Number.isFinite(month)) continue;
-    if (month >= 1 && month <= 9) {
-      q123 += 2;
+    if (month >= 1 && month <= 6) {
+      q12 += 2;
+    } else if (month >= 7 && month <= 9) {
+      q3 += 2;
     } else {
       q4 += 2;
     }
   }
-  return { q123, q4 };
+  return { q12, q3, q4 };
 }
 
 // --- INPS shaping -------------------------------------------------------
@@ -415,15 +419,6 @@ export async function buildScadenziarioView(
     | 'storico'
     | 'previsionale';
 
-  // Forecast bases (usati solo in metodo previsionale; in storico il tax-engine
-  // ignora `forecast*` e usa lo storico). Usiamo `coefficiente * grossCollected`
-  // meno la quota fissa come stima conservativa della base contributi.
-  const forecastBase = grossCollected * Number(ys.coefficiente);
-  const forecastContributionBase = Math.max(
-    forecastBase - currentContribution.fixedAnnual,
-    0,
-  );
-
   const comparisonInput: ComparisonInput = {
     year,
     method: methodSetting,
@@ -441,8 +436,6 @@ export async function buildScadenziarioView(
     ),
     accontiSostitutivaPagatiReali,
     accontiContribPagatiReali,
-    forecastContributionBase,
-    forecastTaxBase: forecastBase,
     methodSetting,
     currentSettings: {
       regime: ys.regime,

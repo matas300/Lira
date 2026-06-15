@@ -262,15 +262,6 @@ export interface ScenarioInput {
    */
   contributiVersatiAnno?: number | null;
   accontoRules?: AccontoRules;
-  /**
-   * WIP forecast previsionale (branch audit-fixes): basi previste passate dai
-   * call site (route tax + scadenziario-service). ATTENZIONE: l'engine NON le
-   * consuma ancora — la previsione usa `forecastGrossCollected` (o il fallback
-   * a `grossCollected`). Tipizzate come opzionali per non perdere l'intento
-   * finché la feature previsionale non viene completata; oggi sono inerti.
-   */
-  forecastContributionBase?: number;
-  forecastTaxBase?: number;
 }
 
 export interface ForfettarioScenario {

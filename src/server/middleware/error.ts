@@ -16,7 +16,14 @@ export class HttpError extends Error {
 export const errorHandler: ErrorHandler = (err, c) => {
   if (err instanceof HttpError) {
     return c.json(
-      { error: { code: err.code, message: err.message, details: err.details } },
+      {
+        error: {
+          code: err.code,
+          message: err.message,
+          // `details` è opzionale nel contratto: emettila solo se presente.
+          ...(err.details !== undefined ? { details: err.details } : {}),
+        },
+      },
       err.status as ContentfulStatusCode,
     );
   }
