@@ -652,3 +652,211 @@ body.sidebar-collapsed .sb-top { flex-direction: column; }
 .regime-needsconfig { text-align: center; }
 .regime-needsconfig h2 { margin: 0 0 var(--space-3); }
 .regime-needsconfig .btn { margin-top: var(--space-4); text-decoration: none; }
+
+/* ═══════════════════════════════════════════════════
+   PAGINA SCADENZE
+   ═══════════════════════════════════════════════════ */
+
+/* ── Head ── */
+.scad-head { margin-bottom: var(--space-4); }
+.scad-head h2 { margin: 0; }
+
+/* ── Chip (timing + stato) ── */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-xs);
+  padding: 2px 8px;
+  font-size: .72rem;
+  font-weight: 600;
+  letter-spacing: .02em;
+}
+.chip-ok    { background: rgba(93,170,138,.18); color: var(--color-success); }
+.chip-warn  { background: rgba(216,166,87,.18);  color: var(--color-warning); }
+.chip-danger{ background: rgba(200,107,116,.18); color: var(--color-error); }
+.chip-info  { background: rgba(93,140,170,.18);  color: var(--color-primary); }
+
+/* ── Summary 4 celle ── */
+.scad-summary { margin-bottom: var(--space-4); }
+.scad-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+@media (max-width: 720px) {
+  .scad-summary-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 420px) {
+  .scad-summary-grid { grid-template-columns: 1fr; }
+}
+.scad-summary-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.scad-summary-label {
+  font-size: .75rem;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: .03em;
+}
+.scad-summary-val {
+  font-size: 1.2rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text);
+}
+.scad-summary-val.is-positive { color: var(--color-success); }
+.scad-summary-val.is-warn     { color: var(--color-warning); }
+.scad-summary-sub { font-size: .78rem; color: var(--color-text-muted); }
+.scad-method-badge { font-size: .8rem; color: var(--color-text-muted); }
+
+/* ── Tabella scadenze ── */
+.scad-table { display: flex; flex-direction: column; gap: var(--space-5); }
+
+.scad-section { display: flex; flex-direction: column; gap: var(--space-2); }
+.scad-section-title {
+  margin: 0 0 var(--space-3);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--color-text);
+  list-style: none; /* per <summary> */
+  cursor: pointer;
+}
+.scad-pagate > .scad-section-title { color: var(--color-text-muted); font-size: 13px; }
+
+.scad-rows { display: flex; flex-direction: column; gap: var(--space-3); }
+
+.scad-empty {
+  color: var(--color-text-muted);
+  font-size: .85rem;
+  padding: var(--space-3) 0;
+}
+
+.scad-footer {
+  margin-top: var(--space-2);
+  text-align: right;
+  font-size: .85rem;
+  color: var(--color-text-muted);
+}
+
+/* ── Riga singola ── */
+.scad-row {
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  display: grid;
+  grid-template-columns: 120px 1fr minmax(130px, 180px) auto;
+  gap: var(--space-3);
+  align-items: start;
+  transition: border-color .15s;
+}
+.scad-row:hover { border-color: var(--color-primary); }
+.scad-row.is-paid { opacity: .72; }
+@media (max-width: 600px) {
+  .scad-row {
+    grid-template-columns: 1fr auto;
+    grid-template-rows: auto auto auto;
+  }
+  .scad-row-voce  { grid-column: 1 / -1; }
+  .scad-row-importo { grid-column: 1; }
+  .scad-row-azioni  { grid-column: 2; }
+}
+
+/* Data + chip timing */
+.scad-row-date {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.scad-due-date {
+  font-size: .82rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+}
+
+/* Voce: titolo + chip stato + competenza + spiegazione */
+.scad-row-voce {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.scad-row-title { font-weight: 600; font-size: .92rem; }
+.scad-competenza { font-size: .72rem; color: var(--color-text-muted); }
+.scad-explanation {
+  font-size: .75rem;
+  color: var(--color-text-muted);
+  line-height: 1.4;
+}
+
+/* Importo + range + pagamenti */
+.scad-row-importo {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: right;
+}
+.scad-amount {
+  font-size: 1rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text);
+}
+.scad-range {
+  font-size: .75rem;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Lista versamenti */
+.scad-payments-list {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: .75rem;
+  color: var(--color-text-muted);
+}
+.scad-pay-data { margin-right: 4px; }
+.scad-pay-importo { font-variant-numeric: tabular-nums; }
+
+/* Azioni */
+.scad-row-azioni {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  align-items: flex-end;
+}
+.scad-btn-pay   { white-space: nowrap; font-size: .8rem; padding: 5px 10px; }
+.scad-btn-unpay { white-space: nowrap; font-size: .8rem; padding: 5px 10px; }
+
+/* ── Pannello warning ── */
+.scad-warn-panel { border-color: var(--color-warning); margin-bottom: var(--space-4); }
+.scad-warn-panel h3 { margin: 0 0 var(--space-3); font-size: 14px; font-weight: 600; }
+.scad-warn-item {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-xs);
+  border-left: 3px solid;
+  margin-bottom: var(--space-2);
+  font-size: .85rem;
+  line-height: 1.45;
+}
+.scad-warn-item p { margin: 4px 0 0; }
+.scad-warn-critical { border-color: var(--color-error);   background: rgba(200,107,116,.10); }
+.scad-warn-high     { border-color: var(--color-error);   background: rgba(200,107,116,.07); }
+.scad-warn-warn     { border-color: var(--color-warning); background: rgba(216,166,87,.10); }
+.scad-warn-info     { border-color: var(--color-primary); background: rgba(93,140,170,.10); }
+
+/* ── needsConfig scadenze ── */
+.scad-needsconfig { text-align: center; }
+.scad-needsconfig h2 { margin: 0 0 var(--space-3); }
+.scad-needsconfig .btn { margin-top: var(--space-4); text-decoration: none; }
+
+/* ── Note generiche ── */
+.scad-panel   { padding: var(--space-4); }
+.scad-note    { font-size: .8rem; color: var(--color-text-muted); line-height: 1.5; margin-top: var(--space-3); }
+.scad-note-warn { color: var(--color-warning); }
