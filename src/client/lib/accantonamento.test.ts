@@ -40,14 +40,14 @@ test('computeAccantonamento: imponibile = importo - ritenuta, daAccantonare = im
   assert.equal(result.rows[0]!.daAccantonare, 540);
 });
 
-test('computeAccantonamento: totals.versato = somma pagamenti, gap = daAccantonare - versato', () => {
+test('computeAccantonamento: totals.versato = somma pagamenti tasse/contributi/misto, gap = daAccantonare - versato', () => {
   const fatture: AccFattura[] = [
     f({ importo: 2000, ritenuta: 200, pagAnno: 2025, pagMese: 3, data: '2025-03-10' }),
     f({ importo: 1000, pagAnno: 2025, pagMese: 6, data: '2025-06-01' }),
   ];
   const pagamenti: AccPagamento[] = [
-    p({ data: '2025-03-15', importo: 300 }),
-    p({ data: '2025-06-20', importo: 150 }),
+    p({ data: '2025-03-15', importo: 300, tipo: 'tasse' }),
+    p({ data: '2025-06-20', importo: 150, tipo: 'contributi' }),
   ];
   const result = computeAccantonamento({ fatture, pagamenti, year: 2025, effectiveRate: 0.30 });
   // lordo totale: 1800 + 1000 = 2800; daAccantonare = 2800 * 0.30 = 840
@@ -149,4 +149,28 @@ test('computeAccantonamento: no fatture → rows vuoto, totals a 0, deferred vuo
   assert.equal(result.totals.gap, 0);
   assert.equal(result.deferred.length, 0);
   assert.equal(result.cumulative.length, 12);
+});
+
+test('computeAccantonamento: bollo/camera/inail/altro/undefined-tipo esclusi da versato', () => {
+  // Solo tasse=300, contributi=150, misto=100 vanno in versato (tot=550).
+  // bollo=500, camera=200, inail=100, altro=50, tipo=undefined=80 → tutti esclusi.
+  const pagamenti: AccPagamento[] = [
+    p({ data: '2025-03-01', importo: 300, tipo: 'tasse' }),
+    p({ data: '2025-04-01', importo: 150, tipo: 'contributi' }),
+    p({ data: '2025-05-01', importo: 100, tipo: 'misto' }),
+    p({ data: '2025-05-15', importo: 500, tipo: 'bollo' }),
+    p({ data: '2025-06-01', importo: 200, tipo: 'camera' }),
+    p({ data: '2025-07-01', importo: 100, tipo: 'inail' }),
+    p({ data: '2025-08-01', importo: 50,  tipo: 'altro' }),
+    p({ data: '2025-09-01', importo: 80,  tipo: undefined }),
+  ];
+  const result = computeAccantonamento({ fatture: [], pagamenti, year: 2025, effectiveRate: 0.30 });
+
+  // totals
+  assert.equal(result.totals.versato, 550, 'solo tasse+contributi+misto contano');
+
+  // cumulative: a maggio (idx=4) versato=300+150+100=550; bollo (maggio) escluso
+  assert.equal(result.cumulative[4]!.versato, 550, 'bollo di maggio non incluso nel cumulato');
+  // a dicembre (idx=11) ancora 550, nient'altro aggiunto dai tipi esclusi
+  assert.equal(result.cumulative[11]!.versato, 550, 'tipi esclusi non aumentano il cumulato finale');
 });

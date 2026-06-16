@@ -2,9 +2,9 @@
 //
 // Calcolo puro "Tasse Accantonate vs Versate".
 // Riceve le fatture (tutte del profilo), i pagamenti dell'anno e il tasso
-// effettivo (imposta+INPS / lordo) già calcolato dal backend. Ritorna:
+// effettivo (imposta+INPS / imponibile) già calcolato dal backend. Ritorna:
 //   - rows: fatture incassate nell'anno, con imponibile e da-accantonare
-//   - totals: lordo, daAccantonare, versato, gap
+//   - totals: lordo (imponibile, netto ritenuta), daAccantonare, versato, gap
 //   - cumulative: serie mese 1..12 (maturato / versato CUMULATI)
 //   - deferred: fatture emesse nell'anno ma non ancora incassate nell'anno
 //
@@ -52,6 +52,15 @@ export interface AccResult {
   cumulative: AccCumPoint[];   // length 12
   deferred: AccDeferred[];
 }
+
+// ── Costanti ─────────────────────────────────────────────────────────────────
+
+/**
+ * Soli tipi di pagamento che rappresentano imposta sostitutiva e/o contributi
+ * INPS, e quindi vanno conteggiati in "versato" nel confronto maturato/versato.
+ * Esclusi: bollo, camera, inail, altro (non sono tasse/contributi P.IVA).
+ */
+const VERSATO_TIPI = new Set(['tasse', 'contributi', 'misto']);
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -117,7 +126,9 @@ export function computeAccantonamento(args: {
   // ── totals ───────────────────────────────────────────────────────────────
   const totaleLordo = round2(rows.reduce((s, r) => s + r.lordo, 0));
   const totaleDaAccantonare = round2(rows.reduce((s, r) => s + r.daAccantonare, 0));
-  const totaleVersato = round2(pagamenti.reduce((s, p) => s + (Number(p.importo) || 0), 0));
+  const totaleVersato = round2(pagamenti
+    .filter((p) => p.tipo != null && VERSATO_TIPI.has(p.tipo))
+    .reduce((s, p) => s + (Number(p.importo) || 0), 0));
   const gap = round2(totaleDaAccantonare - totaleVersato);
 
   // ── cumulative ───────────────────────────────────────────────────────────
@@ -127,7 +138,7 @@ export function computeAccantonamento(args: {
       .filter((r) => r.mese <= m)
       .reduce((s, r) => s + r.daAccantonare, 0));
     const versato = round2(pagamenti
-      .filter((p) => monthFromDate(p.data) <= m)
+      .filter((p) => p.tipo != null && VERSATO_TIPI.has(p.tipo) && monthFromDate(p.data) <= m)
       .reduce((s, p) => s + (Number(p.importo) || 0), 0));
     cumulative.push({ month: m, maturato, versato });
   }
