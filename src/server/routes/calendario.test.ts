@@ -181,6 +181,59 @@ test('PUT con giorno invalido (32) → 400 INVALID_PARAMS', async () => {
   assert.equal(body.error.code, 'INVALID_PARAMS');
 });
 
+// Data impossibile: Feb 31
+test('PUT /api/calendario/2025/2/31 → 400 INVALID_DATE', async () => {
+  const { app, headers } = await makeApp();
+  const res = await app.request('/api/calendario/2025/2/31', {
+    method: 'PUT',
+    headers: { ...headers, 'content-type': 'application/json' },
+    body: JSON.stringify({ activityCode: 'F' }),
+  });
+  assert.equal(res.status, 400);
+  const body = await res.json() as { error: { code: string } };
+  assert.equal(body.error.code, 'INVALID_DATE');
+});
+
+// Data impossibile: Apr 31
+test('PUT /api/calendario/2025/4/31 → 400 INVALID_DATE', async () => {
+  const { app, headers } = await makeApp();
+  const res = await app.request('/api/calendario/2025/4/31', {
+    method: 'PUT',
+    headers: { ...headers, 'content-type': 'application/json' },
+    body: JSON.stringify({ activityCode: 'F' }),
+  });
+  assert.equal(res.status, 400);
+  const body = await res.json() as { error: { code: string } };
+  assert.equal(body.error.code, 'INVALID_DATE');
+});
+
+// Data impossibile su DELETE: Feb 30
+test('DELETE /api/calendario/2025/2/30 → 400 INVALID_DATE', async () => {
+  const { app, headers } = await makeApp();
+  const res = await app.request('/api/calendario/2025/2/30', {
+    method: 'DELETE',
+    headers,
+  });
+  assert.equal(res.status, 400);
+  const body = await res.json() as { error: { code: string } };
+  assert.equal(body.error.code, 'INVALID_DATE');
+});
+
+// activityCode invalido → envelope standard { error: { code } }
+test('PUT con activityCode invalido → 400 con envelope standard { error.code }', async () => {
+  const { app, headers } = await makeApp();
+  const res = await app.request('/api/calendario/2025/3/10', {
+    method: 'PUT',
+    headers: { ...headers, 'content-type': 'application/json' },
+    body: JSON.stringify({ activityCode: 'INVALID' }),
+  });
+  assert.equal(res.status, 400);
+  const body = await res.json() as { error: { code: string; message: string } };
+  assert.ok(body.error, 'body.error deve essere presente');
+  assert.ok(typeof body.error.code === 'string', 'body.error.code deve essere una stringa');
+  assert.equal(body.error.code, 'VALIDATION');
+});
+
 // Senza sessione → 401
 test('GET senza sessione → 401', async () => {
   const { app } = await makeApp();

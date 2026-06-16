@@ -12,10 +12,10 @@
 
 import { Hono } from 'hono';
 import { and, eq } from 'drizzle-orm';
-import { zValidator } from '@hono/zod-validator';
 import { CalendarEntryInput } from '@shared/schemas';
 import { calendarEntries } from '../db/schema';
 import { HttpError } from '../middleware/error';
+import { zJson } from '../middleware/validate';
 import { requireSession, type AuthEnv } from '../middleware/auth';
 
 export const calendarioRoute = new Hono<AuthEnv>();
@@ -32,12 +32,17 @@ function parseYearParam(raw: string): number {
   return n;
 }
 
-function parseMonthDay(rawMonth: string, rawDay: string): { month: number; day: number } {
+function parseMonthDay(year: number, rawMonth: string, rawDay: string): { month: number; day: number } {
   const month = parseInt(rawMonth, 10);
   const day = parseInt(rawDay, 10);
   if (!Number.isInteger(month) || month < 1 || month > 12
     || !Number.isInteger(day) || day < 1 || day > 31) {
     throw new HttpError(400, 'INVALID_PARAMS', `Mese/giorno non validi: "${rawMonth}/${rawDay}"`);
+  }
+  // Cross-check: reject impossible calendar dates (e.g. Feb 31, Apr 31)
+  const d = new Date(Date.UTC(year, month - 1, day));
+  if (d.getUTCFullYear() !== year || d.getUTCMonth() + 1 !== month || d.getUTCDate() !== day) {
+    throw new HttpError(400, 'INVALID_DATE', `Data non valida nel calendario: ${year}-${rawMonth}-${rawDay}`);
   }
   return { month, day };
 }
@@ -70,9 +75,9 @@ calendarioRoute.get('/:year', async (c) => {
 
 // ─────────────────────────── PUT /:year/:month/:day ───────────────────────────
 
-calendarioRoute.put('/:year/:month/:day', zValidator('json', CalendarEntryInput), async (c) => {
+calendarioRoute.put('/:year/:month/:day', zJson(CalendarEntryInput), async (c) => {
   const year = parseYearParam(c.req.param('year'));
-  const { month, day } = parseMonthDay(c.req.param('month'), c.req.param('day'));
+  const { month, day } = parseMonthDay(year, c.req.param('month'), c.req.param('day'));
   const db = c.get('db');
   const profileId = c.get('activeProfileId');
   const { activityCode } = c.req.valid('json');
@@ -95,7 +100,7 @@ calendarioRoute.put('/:year/:month/:day', zValidator('json', CalendarEntryInput)
 
 calendarioRoute.delete('/:year/:month/:day', async (c) => {
   const year = parseYearParam(c.req.param('year'));
-  const { month, day } = parseMonthDay(c.req.param('month'), c.req.param('day'));
+  const { month, day } = parseMonthDay(year, c.req.param('month'), c.req.param('day'));
   const db = c.get('db');
   const profileId = c.get('activeProfileId');
 
