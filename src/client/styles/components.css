@@ -860,3 +860,167 @@ body.sidebar-collapsed .sb-top { flex-direction: column; }
 .scad-panel   { padding: var(--space-4); }
 .scad-note    { font-size: .8rem; color: var(--color-text-muted); line-height: 1.5; margin-top: var(--space-3); }
 .scad-note-warn { color: var(--color-warning); }
+
+/* ═══════════════════════════════════════════════════
+   PAGINA TASSE ACCANTONATE
+   ═══════════════════════════════════════════════════ */
+
+/* ── Head ── */
+.tasse-head { margin-bottom: var(--space-4); }
+.tasse-head h2 { margin: 0; }
+
+/* ── Panel (card contenuto) ── */
+.tasse-panel { padding: var(--space-4); }
+.tasse-panel h3 {
+  margin: 0 0 var(--space-3);
+  font-size: 14px;
+  font-weight: 600;
+}
+.tasse-note {
+  font-size: .8rem;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+  margin-top: var(--space-3);
+}
+.tasse-note-warn { color: var(--color-warning); }
+
+/* ── Status box ok / warn ── */
+.tasse-status {
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) var(--space-5);
+  margin-bottom: var(--space-4);
+  border: 1px solid var(--color-border);
+}
+.tasse-status-ok   { border-color: var(--color-success); background: rgba(111,174,106,.06); }
+.tasse-status-warn { border-color: var(--color-warning); background: rgba(216,166,87,.07); }
+
+.tasse-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin-bottom: var(--space-3);
+}
+.tasse-status-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 140px;
+}
+.tasse-status-label {
+  font-size: .75rem;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: .03em;
+}
+.tasse-status-val {
+  font-size: 1.1rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text);
+}
+
+.tasse-status-gap {
+  font-size: .9rem;
+  font-weight: 600;
+}
+.tasse-status-ok-label   { color: var(--color-success); }
+.tasse-status-warn-label { color: var(--color-warning); }
+
+/* ── Tabella fatture incassate ── */
+.tasse-table {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  margin-top: var(--space-3);
+}
+
+.tasse-table-header,
+.tasse-table-row,
+.tasse-table-footer {
+  display: grid;
+  grid-template-columns: 50px 1fr 130px 140px;
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+}
+
+.tasse-table-header {
+  background: var(--color-surface-2);
+  color: var(--color-text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  font-weight: 600;
+}
+.tasse-table-row {
+  border-top: 1px solid var(--color-border);
+  font-size: .9rem;
+}
+.tasse-table-row:nth-child(even) { background: rgba(255,255,255,.015); }
+.tasse-table-footer {
+  border-top: 2px solid var(--color-border);
+  font-weight: 700;
+  background: var(--color-surface-2);
+  font-size: .9rem;
+}
+
+.tasse-table-mese { color: var(--color-text-muted); font-size: .82rem; }
+.tasse-table-lordo, .tasse-table-acc {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.tasse-table-acc { color: var(--color-tertiary); }
+
+@media (max-width: 600px) {
+  .tasse-table-header { display: none; }
+  .tasse-table-row { grid-template-columns: 40px 1fr 110px; }
+  .tasse-table-acc { display: none; }
+  .tasse-table-footer { grid-template-columns: 40px 1fr 110px; }
+}
+
+/* ── Tabella differite ── */
+.tasse-table-deferred .tasse-table-header,
+.tasse-table-deferred .tasse-table-row {
+  grid-template-columns: 1fr 130px 130px;
+}
+
+@media (max-width: 600px) {
+  .tasse-table-deferred .tasse-table-header { display: none; }
+  .tasse-table-deferred .tasse-table-row { grid-template-columns: 1fr 110px; }
+  .tasse-table-anno { display: none; }
+}
+
+/* ── Grafico cumulato ── */
+.tasse-chart-panel { margin-bottom: var(--space-4); }
+.cumulative-chart { width: 100%; }
+.cumulative-chart-svg { width: 100%; height: auto; display: block; }
+.chart-empty {
+  text-align: center;
+  color: var(--color-text-muted);
+  padding: var(--space-5);
+}
+.chart-legend {
+  display: flex;
+  gap: var(--space-4);
+  margin-top: var(--space-3);
+  justify-content: center;
+}
+.chart-legend-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: .82rem;
+  color: var(--color-text-muted);
+}
+.chart-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+/* ── needsConfig tasse ── */
+.tasse-needsconfig { text-align: center; }
+.tasse-needsconfig h2 { margin: 0 0 var(--space-3); }
+.tasse-needsconfig .btn { margin-top: var(--space-4); text-decoration: none; }
