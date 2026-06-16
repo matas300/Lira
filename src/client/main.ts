@@ -8,8 +8,8 @@ const routes: Record<string, () => Promise<PageModule>> = {
   '/profiles': () => import('./pages/profiles'),
   '/clienti': () => import('./pages/clienti'),
   '/fatture': () => import('./pages/fatture'),
+  '/': () => import('./pages/regime'),
   // non ancora implementate → placeholder condiviso
-  '/': () => import('./pages/placeholder'),
   '/tasse': () => import('./pages/placeholder'),
   '/scadenze': () => import('./pages/placeholder'),
   '/calendario': () => import('./pages/placeholder'),
