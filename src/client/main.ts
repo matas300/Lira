@@ -9,8 +9,8 @@ const routes: Record<string, () => Promise<PageModule>> = {
   '/clienti': () => import('./pages/clienti'),
   '/fatture': () => import('./pages/fatture'),
   '/': () => import('./pages/regime'),
+  '/tasse': () => import('./pages/tasse'),
   // non ancora implementate → placeholder condiviso
-  '/tasse': () => import('./pages/placeholder'),
   '/scadenze': () => import('./pages/scadenze'),
   '/calendario': () => import('./pages/placeholder'),
   '/budget': () => import('./pages/placeholder'),
