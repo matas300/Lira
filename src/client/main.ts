@@ -5,10 +5,16 @@ type PageModule = { mount: (container: HTMLElement) => () => void };
 
 const routes: Record<string, () => Promise<PageModule>> = {
   '/login': () => import('./pages/login'),
-  '/': () => import('./pages/dashboard'),
   '/profiles': () => import('./pages/profiles'),
   '/clienti': () => import('./pages/clienti'),
   '/fatture': () => import('./pages/fatture'),
+  // non ancora implementate → placeholder condiviso
+  '/': () => import('./pages/placeholder'),
+  '/tasse': () => import('./pages/placeholder'),
+  '/scadenze': () => import('./pages/placeholder'),
+  '/calendario': () => import('./pages/placeholder'),
+  '/budget': () => import('./pages/placeholder'),
+  '/dichiarazione': () => import('./pages/placeholder'),
 };
 
 const PUBLIC_ROUTES = new Set(['/login']);
