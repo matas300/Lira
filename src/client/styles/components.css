@@ -483,3 +483,172 @@ body.sidebar-collapsed .sb-top { flex-direction: column; }
 .import-report ul { list-style: none; display: flex; flex-direction: column; gap: var(--space-1); }
 .import-report .warn { color: var(--color-warning); }
 .import-report .err { color: var(--color-error); }
+
+/* ── Pagina Regime Forfettario (port sezioni Calcolo+Riepilogo CalcoliVari) ── */
+.regime-head { margin-bottom: var(--space-4); }
+.regime-head h2 { margin: 0; }
+
+/* Griglia responsive di pannelli: due colonne su desktop, una su mobile. */
+.regime-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+@media (max-width: 720px) {
+  .regime-grid { grid-template-columns: 1fr; }
+}
+
+.regime-panel { padding: var(--space-4); }
+.regime-panel h3 {
+  margin: 0 0 var(--space-3);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* Pannelli che occupano l'intera larghezza della griglia. */
+.regime-donut-panel,
+.regime-warn-panel,
+.regime-grid > .regime-limit,
+.regime-grid > .regime-panel:last-child {
+  grid-column: 1 / -1;
+}
+
+.regime-note {
+  font-size: .8rem;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+  margin-top: var(--space-3);
+}
+.regime-note-warn { color: var(--color-warning); }
+
+.regime-explanation {
+  font-size: .8rem;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+  margin-top: var(--space-3);
+}
+.regime-explanation p { margin: 0 0 var(--space-2); }
+
+/* ── Righe di sintesi label … valore ── */
+.summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: 6px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+.summary-row:last-child { border-bottom: none; }
+.summary-label { color: var(--color-text-muted); font-size: .9rem; }
+.summary-val { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--color-text); }
+.summary-row.is-highlight .summary-label { color: var(--color-text); }
+.summary-row.is-highlight .summary-val { color: var(--color-primary); }
+.summary-row.is-positive .summary-val { color: var(--color-success); }
+.summary-row.is-negative .summary-val { color: var(--color-tertiary); }
+
+/* ── Donut ── */
+.donut {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-5);
+}
+.donut-svg { flex-shrink: 0; }
+.donut-empty {
+  text-align: center;
+  color: var(--color-text-muted);
+  padding: var(--space-5);
+}
+.donut-legend {
+  flex: 1;
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.donut-legend-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: .85rem;
+}
+.donut-legend-dot {
+  width: 10px; height: 10px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+.donut-legend-label { flex: 1; color: var(--color-text-muted); }
+.donut-legend-val { font-variant-numeric: tabular-nums; font-weight: 600; }
+.donut-legend-total {
+  margin-top: var(--space-1);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
+}
+.donut-legend-total .donut-legend-label { color: var(--color-text); font-weight: 600; }
+
+/* ── Barra limite ── */
+.regime-limit-head {
+  font-size: .85rem;
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-1);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Tabella mensile ── */
+.monthly-table {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+}
+.monthly-header,
+.monthly-row {
+  display: grid;
+  grid-template-columns: 60px repeat(3, minmax(0, 1fr)) 80px;
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+}
+.monthly-header {
+  background: var(--color-surface-2);
+  color: var(--color-text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  font-weight: 600;
+}
+.monthly-row {
+  border-top: 1px solid var(--color-border);
+  font-size: .9rem;
+}
+.monthly-row:nth-child(even) { background: rgba(255,255,255,.015); }
+.monthly-row .monthly-mese { font-weight: 600; }
+.monthly-row .monthly-lordo,
+.monthly-row .monthly-netto,
+.monthly-row .monthly-tasse { text-align: right; font-variant-numeric: tabular-nums; }
+.monthly-row .monthly-netto { color: var(--color-success); }
+.monthly-row .monthly-tasse { color: var(--color-tertiary); }
+.monthly-row .monthly-fonte { color: var(--color-text-muted); font-size: .8rem; text-align: right; }
+@media (max-width: 600px) {
+  .monthly-header { display: none; }
+  .monthly-row { grid-template-columns: 50px 1fr 1fr; }
+  .monthly-row .monthly-tasse, .monthly-row .monthly-fonte { display: none; }
+}
+
+/* ── Warning fiscali ── */
+.regime-warn-panel { border-color: var(--color-warning); }
+.regime-warn-list { display: flex; flex-direction: column; gap: var(--space-2); }
+.regime-warn-item {
+  background: rgba(216,166,87,.10);
+  border-left: 3px solid var(--color-warning);
+  border-radius: var(--radius-xs);
+  padding: var(--space-2) var(--space-3);
+  font-size: .85rem;
+  color: var(--color-text);
+  line-height: 1.45;
+}
+
+/* ── needsConfig CTA ── */
+.regime-needsconfig { text-align: center; }
+.regime-needsconfig h2 { margin: 0 0 var(--space-3); }
+.regime-needsconfig .btn { margin-top: var(--space-4); text-decoration: none; }
