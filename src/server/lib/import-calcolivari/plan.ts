@@ -91,6 +91,34 @@ export async function buildImportPlan(
   return { profileName, userId: user.id, profileId, slug, profileOp, profileRow, entities, issues };
 }
 
+// Lira impone numerazione unica (profilo, anno, progressivo). I dati CalcoliVari
+// hanno molte fatture distinte con lo stesso progressivo (tipicamente 0 per le
+// fatture mensili/legacy importate in blocco). Rinumeriamo per anno ordinando per
+// data (tiebreak su id per determinismo): 1..N gap-free, aggiornando numeroDisplay.
+function renumberFattureByYear(rows: any[]): any[] {
+  const byYear = new Map<number, any[]>();
+  for (const r of rows) {
+    const y = r.annoProgressivo ?? 0;
+    const bucket = byYear.get(y) ?? [];
+    bucket.push(r);
+    byYear.set(y, bucket);
+  }
+  const out: any[] = [];
+  for (const [year, list] of byYear) {
+    list.sort((a, b) => {
+      const da = String(a.data ?? ''), db = String(b.data ?? '');
+      if (da !== db) return da < db ? -1 : 1;
+      return String(a.id) < String(b.id) ? -1 : 1;
+    });
+    list.forEach((r, i) => {
+      r.progressivo = i + 1;
+      r.numeroDisplay = `${year}/${i + 1}`;
+    });
+    out.push(...list);
+  }
+  return out;
+}
+
 function mergeMapped(list: MappedRows[]): MappedRows {
   const concat = (sel: (m: MappedRows) => any[]) => list.flatMap(sel);
   const profilesMerged = list.map((m) => m.profiles[0]).filter(Boolean);
@@ -98,7 +126,9 @@ function mergeMapped(list: MappedRows[]): MappedRows {
     profiles: profilesMerged.length ? [dedupRicher(profilesMerged, (p) => p.slug)[0]] : [],
     yearSettings: dedupRicher(concat((m) => m.yearSettings), (r) => `${r.year}`),
     clienti: dedupRicher(concat((m) => m.clienti), (r) => r.id),
-    fatture: dedupRicher(concat((m) => m.fatture), (r) => `${r.annoProgressivo}:${r.progressivo}`),
+    // Dedup per id (non per anno:progressivo): fatture distinte non vanno collassate
+    // anche se condividono il progressivo. Stesso id su più file → longest-wins.
+    fatture: renumberFattureByYear(dedupRicher(concat((m) => m.fatture), (r) => r.id)),
     pagamenti: dedupRicher(concat((m) => m.pagamenti), (r) => r.id),
     calendarEntries: dedupRicher(concat((m) => m.calendarEntries), (r) => `${r.year}:${r.month}:${r.day}`),
     budgetItems: dedupRicher(concat((m) => m.budgetItems), (r) => r.id),

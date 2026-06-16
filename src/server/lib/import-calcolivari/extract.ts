@@ -46,7 +46,11 @@ export function extractAll(exp: RawExport): ExtractedData {
   const canon = ((keyFor(keys, p, 'fattureEmesse') as any[]) ?? []).map((f) => ({ ...f }));
   const legacy: Array<Record<string, any>> = [];
   for (const doc of docs) {
-    const wiped = doc.data?._fattureManualeWipedBackup ?? doc.data?.fatture ?? {};
+    // _fattureManualeWipedBackup = invoice genuinamente wipate (recupera sempre).
+    // doc.data.fatture = vecchia struttura pre-migrazione: è un mirror di ciò che
+    // ora sta in fattureEmesse, quindi va usata SOLO se il profilo non ha canon
+    // (mai migrato a fattureEmesse), altrimenti duplicheremmo le fatture canoniche.
+    const wiped = doc.data?._fattureManualeWipedBackup ?? (canon.length === 0 ? doc.data?.fatture : undefined) ?? {};
     let idx = 0;
     for (const arr of Object.values(wiped)) {
       for (const row of (Array.isArray(arr) ? arr : [])) {

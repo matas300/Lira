@@ -49,6 +49,35 @@ test('extractAll: fattura canonica + legacy da _fattureManualeWipedBackup', () =
   assert.ok(legacy!.progressivo >= 9000);
 });
 
+test('extractAll: doc.data.fatture NON re-importate se fattureEmesse esiste (no duplicati)', () => {
+  // Profilo migrato: le invoice stanno in fattureEmesse (canon) E nella vecchia
+  // struttura year-doc `fatture` (mirror pre-migrazione). Non vanno contate due volte.
+  const MIGRATED = {
+    'calcoliPIVA_Mattia_2024': {
+      settings: { regime: 'forfettario' },
+      fatture: { '3': [{ importo: 300, desc: 'mirror', pagMese: 3, pagAnno: 2024 }] },
+    },
+    'calcoliPIVA_Mattia_fattureEmesse': [
+      { id: 'f1', annoProgressivo: 2024, progressivo: 1, data: '2024-03-01', totaleLordo: 300, righe: [] },
+    ],
+  };
+  const ex = extractAll(detect(MIGRATED));
+  assert.equal(ex.fatture.length, 1, 'solo la canonica, niente legacy duplicata');
+  assert.equal(ex.fatture.filter((f) => f.origine === 'legacy-migrated').length, 0);
+});
+
+test('extractAll: doc.data.fatture recuperate se profilo mai migrato (fattureEmesse assente)', () => {
+  const UNMIGRATED = {
+    'calcoliPIVA_Peru_2024': {
+      settings: { regime: 'forfettario' },
+      fatture: { '3': [{ importo: 300, desc: 'vecchia', pagMese: 3, pagAnno: 2024 }] },
+    },
+  };
+  const ex = extractAll(detect(UNMIGRATED));
+  assert.equal(ex.fatture.length, 1, 'recuperata dalla vecchia struttura');
+  assert.equal(ex.fatture[0]!.origine, 'legacy-migrated');
+});
+
 test('extractAll: calendar sparso, code vuoto scartato', () => {
   const ex = extractAll(detect(SAMPLE));
   assert.equal(ex.calendar.length, 1);
