@@ -74,7 +74,7 @@ export function mapAll(ex: ExtractedData, ctx: Ctx): { rows: MappedRows; issues:
       limiteForfettario: nn(s['limiteForfettario']) ?? 85000, scadenziarioMetodo: ns(s['scadenziarioMetodoAcconti']) ?? 'storico',
       primoAnnoFatturatoPrec: nn(s['primoAnnoFatturatoPrec']), primoAnnoImpostaPrec: nn(s['primoAnnoImpostaPrec']),
       primoAnnoAccontiImpostaPrec: nn(s['primoAnnoAccontiImpostaPrec']), primoAnnoContribVariabiliPrec: nn(s['primoAnnoContribVariabiliPrec']),
-      primoAnnoAccontiContribPrec: nn(s['primoAnnoAccontiContribPrec']), overrides: JSON.stringify(buildOverrides(s)),
+      primoAnnoAccontiContribPrec: nn(s['primoAnnoAccontiContribPrec']), tariffaGiornaliera: nn(s['dailyRate']), overrides: JSON.stringify(buildOverrides(s)),
     };
   }).filter((r) => validate(S.zYearSettings, r, 'yearSettings', `year ${r.year}`, issues));
 

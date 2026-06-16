@@ -76,6 +76,8 @@ export const yearSettings = sqliteTable(
     // Audit fix M1: stato comunicazione INPS della riduzione 35%.
     riduzione35Comunicata: integer('riduzione_35_comunicata').notNull().default(0),
     riduzione35DataComunicazione: text('riduzione_35_data_comunicazione'),
+    // Slice B: tariffa giornaliera per "crea fattura dal calendario" (per-anno).
+    tariffaGiornaliera: real('tariffa_giornaliera'),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.profileId, t.year] }),

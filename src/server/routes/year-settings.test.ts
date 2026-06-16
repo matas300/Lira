@@ -130,6 +130,31 @@ test('PUT coefficiente invalido (0.50) → 422 COEFFICIENTE_NON_AMMESSO', async 
   assert.equal(body.error.code, 'COEFFICIENTE_NON_AMMESSO');
 });
 
+test('PUT con tariffaGiornaliera: 250 → GET restituisce tariffaGiornaliera === 250', async () => {
+  const { app, headers } = await makeApp();
+
+  const putRes = await app.request('/api/year-settings/2026', {
+    method: 'PUT',
+    headers: { ...headers, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      regime: 'forfettario',
+      coefficiente: 0.67,
+      impostaSostitutiva: 0.15,
+      inpsMode: 'artigiani_commercianti',
+      inpsCategoria: 'artigiano',
+      tariffaGiornaliera: 250,
+    }),
+  });
+  assert.equal(putRes.status, 200);
+  const putBody = await putRes.json();
+  assert.equal(putBody.yearSettings.tariffaGiornaliera, 250);
+
+  const getRes = await app.request('/api/year-settings/2026', { headers });
+  assert.equal(getRes.status, 200);
+  const getBody = await getRes.json();
+  assert.equal(getBody.yearSettings.tariffaGiornaliera, 250);
+});
+
 test('PATCH /:year/warnings: confirm/unconfirm aggiorna overrides.confirmedWarnings', async () => {
   const { app, headers, db, profileId } = await makeApp();
 

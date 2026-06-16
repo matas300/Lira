@@ -1,0 +1,1 @@
+ALTER TABLE `year_settings` ADD `tariffa_giornaliera` real;

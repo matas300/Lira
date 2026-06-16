@@ -85,6 +85,7 @@ export const YearSettingsInput = z.object({
   primoAnnoAccontiImpostaPrec: z.number().nullable().optional(),
   primoAnnoContribVariabiliPrec: z.number().nullable().optional(),
   primoAnnoAccontiContribPrec: z.number().nullable().optional(),
+  tariffaGiornaliera: z.number().nonnegative().nullable().optional(),
   overrides: z.record(z.unknown()).optional(),
 });
 

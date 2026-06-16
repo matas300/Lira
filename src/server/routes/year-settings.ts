@@ -94,6 +94,7 @@ function toPublic(row: YearSettingsRow) {
     primoAnnoAccontiImpostaPrec: row.primoAnnoAccontiImpostaPrec,
     primoAnnoContribVariabiliPrec: row.primoAnnoContribVariabiliPrec,
     primoAnnoAccontiContribPrec: row.primoAnnoAccontiContribPrec,
+    tariffaGiornaliera: row.tariffaGiornaliera,
     overrides: overridesParsed,
   };
 }
@@ -201,6 +202,7 @@ yearSettingsRoute.put('/:year', zValidator('json', YearSettingsInput), async (c)
     primoAnnoAccontiImpostaPrec: body.primoAnnoAccontiImpostaPrec ?? null,
     primoAnnoContribVariabiliPrec: body.primoAnnoContribVariabiliPrec ?? null,
     primoAnnoAccontiContribPrec: body.primoAnnoAccontiContribPrec ?? null,
+    tariffaGiornaliera: body.tariffaGiornaliera ?? null,
     overrides: body.overrides ? JSON.stringify(body.overrides) : null,
   };
 

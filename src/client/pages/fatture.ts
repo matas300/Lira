@@ -10,6 +10,21 @@ import {
 import { parseFatturaXml, ImportParseError } from '../lib/parse-fattura-xml';
 import { buildImportItem } from '@shared/import-fattura';
 import type { FatturaPublic, ClientePublic, Riga, ImportFatturaInput, ImportReport } from '@shared/types';
+import { getYear } from '../lib/year';
+import { monthlyWorkStats } from '../lib/calendar-stats';
+
+// Draft prefill per nuova fattura da-calendario (non ha id/stato: è sempre "nuova").
+interface NewFatturaDraft {
+  clienteId?: string;
+  data?: string;
+  righe?: Riga[];
+  note?: string | null;
+}
+
+const MESI_NOMI = [
+  'Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
+  'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre',
+];
 
 const LIMITE_FORFETTARIO_FALLBACK = 85000;
 
@@ -143,12 +158,21 @@ export function mount(container: HTMLElement): () => void {
       </div>`;
   }
 
-  function formHtml(f?: FatturaPublic): string {
+  function formHtml(f?: FatturaPublic, draft?: NewFatturaDraft): string {
+    // draft è usato solo quando f è undefined (nuova fattura prefill da-calendario).
+    const prefill = !f ? draft : undefined;
     const opts = clienti.map((c) => {
-      const sel = f?.clienteId === c.id || (!f && c.isDefault) ? ' selected' : '';
+      const sel = f?.clienteId === c.id
+        || prefill?.clienteId === c.id
+        || (!f && !prefill?.clienteId && c.isDefault) ? ' selected' : '';
       return `<option value="${esc(c.id)}"${sel}>${esc(c.nome)}</option>`;
     }).join('');
-    const righe = (f?.righe && f.righe.length ? f.righe : [{ descrizione: '', quantita: 1, prezzoUnitario: 0 }]);
+    const righe = f?.righe && f.righe.length
+      ? f.righe
+      : prefill?.righe && prefill.righe.length
+        ? prefill.righe
+        : [{ descrizione: '', quantita: 1, prezzoUnitario: 0 }];
+    const dataVal = f?.data ?? prefill?.data ?? new Date().toISOString().slice(0, 10);
     const locked = !!f && f.stato !== 'bozza';
     return `
       <form data-form style="display:flex;flex-direction:column;gap:var(--space-3);">
@@ -156,12 +180,12 @@ export function mount(container: HTMLElement): () => void {
         <div class="form-row"><label>Cliente *</label>
           <select class="input" data-cliente ${locked ? 'disabled' : ''}>${opts}</select></div>
         <div class="form-row"><label>Data *</label>
-          <input class="input" type="date" data-data value="${esc(f?.data ?? new Date().toISOString().slice(0, 10))}" ${locked ? 'disabled' : ''} /></div>
+          <input class="input" type="date" data-data value="${esc(dataVal)}" ${locked ? 'disabled' : ''} /></div>
         <div><label>Righe</label>
           <div data-righe style="display:flex;flex-direction:column;gap:var(--space-2);">${righe.map((r) => rigaInputs(r)).join('')}</div>
           ${locked ? '' : `<button type="button" class="btn btn-ghost" data-add-riga style="margin-top:var(--space-2);">+ Riga</button>`}</div>
         <div style="text-align:right;font-weight:600;">Totale: <span data-totale>—</span></div>
-        <div class="form-row"><label>Note</label><input class="input" data-note value="${esc(f?.note)}" /></div>
+        <div class="form-row"><label>Note</label><input class="input" data-note value="${esc(f?.note ?? prefill?.note)}" /></div>
         <p class="form-error" data-error hidden></p>
         <div style="display:flex;gap:var(--space-2);justify-content:space-between;">
           <button type="submit" class="btn btn-primary">Salva</button>
@@ -184,10 +208,10 @@ export function mount(container: HTMLElement): () => void {
     if (el) el.textContent = eur(tot);
   }
 
-  function openFatturaModal(existing?: FatturaPublic): void {
+  function openFatturaModal(existing?: FatturaPublic, draft?: NewFatturaDraft): void {
     const handle = openModal({
       title: existing ? (existing.numeroDisplay ?? 'Bozza') : 'Nuova fattura',
-      bodyHtml: formHtml(existing),
+      bodyHtml: formHtml(existing, draft),
       onMount: (root, close) => {
         const form = root.querySelector<HTMLFormElement>('[data-form]')!;
         const errorEl = root.querySelector<HTMLElement>('[data-error]')!;
@@ -241,6 +265,184 @@ export function mount(container: HTMLElement): () => void {
       },
     });
     activeModalClose = handle.close;
+  }
+
+  // ── Flusso "Da calendario" ───────────────────────────────────────────────────
+
+  function lastDayOfMonth(year: number, month: number): string {
+    const d = new Date(year, month, 0); // giorno 0 del mese successivo = ultimo del mese
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${d.getFullYear()}-${mm}-${dd}`;
+  }
+
+  async function openDaCalendarioFlow(): Promise<void> {
+    const year = getYear();
+    const defaultCliente = clienti.find((c) => c.isDefault);
+
+    // 1. Carica calendario e year-settings in parallelo
+    let overrides: Map<string, string>;
+    let tariffaGiornaliera: number | null = null;
+    let yearSettingsExist = false;
+    let currentSettings: Record<string, unknown> | null = null;
+
+    try {
+      const [calRes, settingsRes] = await Promise.allSettled([
+        api.get<{ entries: Array<{ month: number; day: number; activityCode: string }> }>(`/api/calendario/${year}`),
+        api.get<{ yearSettings: Record<string, unknown> }>(`/api/year-settings/${year}`),
+      ]);
+
+      const entries = calRes.status === 'fulfilled' ? calRes.value.entries : [];
+      overrides = new Map(entries.map((e) => [`${e.month}-${e.day}`, e.activityCode]));
+
+      if (settingsRes.status === 'fulfilled') {
+        const ys = settingsRes.value.yearSettings;
+        const t = ys?.tariffaGiornaliera;
+        if (typeof t === 'number' && t > 0) tariffaGiornaliera = t;
+        yearSettingsExist = true;
+        currentSettings = ys as Record<string, unknown>;
+      }
+    } catch {
+      overrides = new Map();
+    }
+
+    const stats = monthlyWorkStats(year, overrides);
+
+    // 2. Picker modal
+    await new Promise<void>((resolvePicker) => {
+
+      function computeImportoRiga(gg: number, mezze: number, tariffa: number): number {
+        return gg * tariffa + mezze * (tariffa / 2);
+      }
+
+      function buildPickerBody(tariffa: number | null): string {
+        const tarVal = tariffa != null ? String(tariffa) : '';
+        const rows = stats.map((s) => {
+          const nomeMese = MESI_NOMI[s.month - 1] ?? `Mese ${s.month}`;
+          const hasWork = s.worked > 0 || s.half > 0;
+          const importo = tariffa != null && hasWork
+            ? computeImportoRiga(s.worked, s.half, tariffa)
+            : null;
+          const label = [
+            s.worked > 0 ? `${s.worked} gg` : '',
+            s.half > 0 ? `${s.half} mezze` : '',
+          ].filter(Boolean).join(' + ');
+          const importoStr = importo != null ? ` · ${eur(importo)}` : '';
+          return `
+            <button type="button" class="cal-month-picker-btn${hasWork ? '' : ' disabled'}"
+              data-month="${s.month}" ${hasWork ? '' : 'disabled aria-disabled="true"'}>
+              <span class="cal-month-name">${esc(nomeMese)}</span>
+              <span class="cal-month-detail">${hasWork ? esc(label) + importoStr : 'Nessun giorno'}</span>
+            </button>`;
+        }).join('');
+
+        return `
+          <div class="cal-picker-modal">
+            <div class="form-row cal-picker-tariffa-row">
+              <label>Tariffa giornaliera (€) *</label>
+              <input class="input" type="number" min="0" step="0.01" data-tariffa
+                value="${esc(tarVal)}" placeholder="es. 300" />
+            </div>
+            <p class="form-error" data-picker-error hidden></p>
+            <div class="cal-month-grid">${rows}</div>
+          </div>`;
+      }
+
+      const pickerHandle = openModal({
+        title: `Da calendario ${year}`,
+        bodyHtml: buildPickerBody(tariffaGiornaliera),
+        onMount: (root, close) => {
+
+          function getPickerTariffa(): number | null {
+            const v = root.querySelector<HTMLInputElement>('[data-tariffa]')!.value.trim();
+            if (!v) return null;
+            const n = Number(v);
+            return Number.isFinite(n) && n > 0 ? n : null;
+          }
+
+          function updateMonthAmounts(): void {
+            const tariffa = getPickerTariffa();
+            root.querySelectorAll<HTMLButtonElement>('[data-month]').forEach((btn) => {
+              const m = Number(btn.dataset.month);
+              const s = stats.find((x) => x.month === m);
+              if (!s) return;
+              const hasWork = s.worked > 0 || s.half > 0;
+              const detail = btn.querySelector<HTMLElement>('.cal-month-detail');
+              if (!detail) return;
+              const label = [
+                s.worked > 0 ? `${s.worked} gg` : '',
+                s.half > 0 ? `${s.half} mezze` : '',
+              ].filter(Boolean).join(' + ');
+              if (hasWork && tariffa != null) {
+                detail.textContent = `${label} · ${eur(computeImportoRiga(s.worked, s.half, tariffa))}`;
+              } else if (hasWork) {
+                detail.textContent = label;
+              }
+            });
+          }
+
+          root.querySelector<HTMLInputElement>('[data-tariffa]')
+            ?.addEventListener('input', updateMonthAmounts);
+
+          root.querySelectorAll<HTMLButtonElement>('[data-month]').forEach((btn) => {
+            btn.addEventListener('click', async () => {
+              const tariffa = getPickerTariffa();
+              const errorEl = root.querySelector<HTMLElement>('[data-picker-error]')!;
+              if (!tariffa) {
+                errorEl.textContent = 'Inserisci una tariffa giornaliera valida.';
+                errorEl.hidden = false;
+                root.querySelector<HTMLInputElement>('[data-tariffa]')?.focus();
+                return;
+              }
+              errorEl.hidden = true;
+
+              const month = Number(btn.dataset.month);
+              const s = stats.find((x) => x.month === month)!;
+              const nomeMese = MESI_NOMI[month - 1] ?? `Mese ${month}`;
+
+              // Costruisci le righe
+              const righe: Riga[] = [];
+              if (s.worked > 0) {
+                righe.push({
+                  descrizione: `Consulenza ${nomeMese} ${year} — giornate intere`,
+                  quantita: s.worked,
+                  prezzoUnitario: tariffa,
+                });
+              }
+              if (s.half > 0) {
+                righe.push({
+                  descrizione: `Consulenza ${nomeMese} ${year} — mezze giornate`,
+                  quantita: s.half,
+                  prezzoUnitario: tariffa / 2,
+                });
+              }
+
+              const draft: NewFatturaDraft = {
+                clienteId: defaultCliente?.id,
+                data: lastDayOfMonth(year, month),
+                righe,
+              };
+
+              // Persisti la tariffa in year-settings se esistono
+              if (yearSettingsExist && currentSettings != null) {
+                try {
+                  const merged = { ...currentSettings, tariffaGiornaliera: tariffa };
+                  await api.put(`/api/year-settings/${year}`, merged);
+                } catch {
+                  // Non bloccante: tariffa già mostrata nel picker
+                }
+              }
+
+              // Chiudi picker e apri modal fattura
+              close();
+              openFatturaModal(undefined, draft);
+            });
+          });
+        },
+        onClose: () => resolvePicker(),
+      });
+      activeModalClose = pickerHandle.close;
+    });
   }
 
   function openNotaCreditoModal(orig: FatturaPublic): void {
@@ -382,6 +584,7 @@ export function mount(container: HTMLElement): () => void {
             <h2 style="margin:0;">Fatture</h2>
             <div style="display:flex;gap:var(--space-2);">
               <button class="btn btn-ghost" data-import-xml>Importa XML</button>
+              <button class="btn btn-ghost" data-da-calendario${clienti.length ? '' : ' disabled title="Crea prima un cliente"'}>Da calendario</button>
               <button class="btn btn-primary" data-new${clienti.length ? '' : ' disabled title="Crea prima un cliente"'}>Nuova</button>
             </div>
             <input type="file" accept=".xml,text/xml,application/xml" multiple data-xml-input hidden />
@@ -397,6 +600,11 @@ export function mount(container: HTMLElement): () => void {
         </div>`;
 
       main.querySelector<HTMLButtonElement>('[data-new]')?.addEventListener('click', () => openFatturaModal());
+      main.querySelector<HTMLButtonElement>('[data-da-calendario]')?.addEventListener('click', () => {
+        openDaCalendarioFlow().catch((err: unknown) => {
+          console.error('Da calendario error:', err);
+        });
+      });
       main.querySelectorAll<HTMLButtonElement>('[data-filter]').forEach((b) => b.addEventListener('click', () => {
         filterKey = b.dataset.filter!; renderChips(); renderList();
       }));
