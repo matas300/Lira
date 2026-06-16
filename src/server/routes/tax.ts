@@ -30,7 +30,8 @@ import { TaxSimulateInput } from '@shared/schemas';
 import { INPS_ARTCOM, INPS_GS, getInpsArtComForYear } from '@shared/inps-params';
 import { ACCONTO_RULES } from '@shared/acconto-rules';
 import { FORFETTARIO_RULES } from '@shared/forfettario-rules';
-import { buildForfettarioScenario } from '../lib/tax-engine';
+import { buildForfettarioScenario, buildForfettarioMethodComparison } from '../lib/tax-engine';
+import { loadScenarioData } from '../lib/scenario-data';
 import { HttpError } from '../middleware/error';
 import { requireSession, type AuthEnv } from '../middleware/auth';
 
@@ -38,21 +39,27 @@ export const taxRoute = new Hono<AuthEnv>();
 
 taxRoute.use('*', requireSession);
 
+/**
+ * Risolve il parametro `year` di una query: assente → anno corrente UTC;
+ * presente ma non intero 2000-2100 → 400 INVALID_YEAR. Stessa convenzione di
+ * `/rules` (estratta per riuso fra `/rules` e `/scenario`).
+ */
+function resolveYearQuery(yearQ: string | undefined): number {
+  if (yearQ === undefined) return new Date().getUTCFullYear();
+  const parsed = Number(yearQ);
+  if (!Number.isInteger(parsed) || parsed < 2000 || parsed > 2100) {
+    throw new HttpError(400, 'INVALID_YEAR', `Anno "${yearQ}" non valido: atteso un intero tra 2000 e 2100.`);
+  }
+  return parsed;
+}
+
 // ─────────────────────────── GET /rules?year=YYYY ───────────────────────────
 
 taxRoute.get('/rules', (c) => {
-  const yearQ = c.req.query('year');
   // year opzionale: se assente → anno corrente. Se presente deve essere un
   // intero 2000-2100 (un anno mancante in tabella resta lecito → null nel body,
   // by design; un anno NON parseabile è invece un input errato → 400).
-  let year = new Date().getUTCFullYear();
-  if (yearQ !== undefined) {
-    const parsed = Number(yearQ);
-    if (!Number.isInteger(parsed) || parsed < 2000 || parsed > 2100) {
-      throw new HttpError(400, 'INVALID_YEAR', `Anno "${yearQ}" non valido: atteso un intero tra 2000 e 2100.`);
-    }
-    year = parsed;
-  }
+  const year = resolveYearQuery(c.req.query('year'));
   return c.json({
     year,
     inpsArtcom: INPS_ARTCOM[year] ?? null,
@@ -106,4 +113,65 @@ taxRoute.post('/simulate', zValidator('json', TaxSimulateInput), (c) => {
     accontiContribPagatiReali: 0,
   });
   return c.json(scenario);
+});
+
+// ─────────────────────────── GET /scenario?year=YYYY ───────────────────────────
+//
+// Posizione fiscale REALE dell'anno selezionato per il profilo della sessione:
+// legge fatture incassate, pagamenti acconto e year-settings (via
+// `loadScenarioData`), poi chiama il motore (`buildForfettarioMethodComparison`).
+// Stateless dal punto di vista fiscale: tutta la matematica è nel motore, qui
+// solo orchestrazione I/O + breakdown mensile proporzionale.
+//
+// Contratto (sorgente di verità BE↔FE, vedi plan):
+//  - year-settings assenti → { year, needsConfig: true }
+//  - altrimenti → { year, needsConfig: false, grossCollected, limite,
+//                   comparison: ComparisonOutput, monthly: [...] }
+//  monthly[i] = { month, lordo (incassato del mese), netto, tasseContrib, fonte }
+//  con netto/tasseContrib ripartiti proporzionalmente al lordo mensile rispetto
+//  al totale annuo dello scenario selezionato.
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+taxRoute.get('/scenario', async (c) => {
+  const year = resolveYearQuery(c.req.query('year'));
+  const db = c.get('db');
+  const profileId = c.get('activeProfileId');
+
+  const data = await loadScenarioData(db, profileId, year);
+  if (!data) {
+    return c.json({ year, needsConfig: true });
+  }
+
+  const comparison = buildForfettarioMethodComparison(data.comparisonInput);
+  const selected = comparison.selected;
+
+  // Ripartizione mensile: il netto/tasse annui dello scenario selezionato sono
+  // distribuiti pro-quota sul lordo incassato di ciascun mese. La somma dei
+  // mesi può divergere di centesimi dal totale annuo (arrotondamenti per riga):
+  // è un breakdown UI, non un dato fiscale (la verità resta in `comparison`).
+  const gross = data.grossCollected;
+  const tasseContribAnnuo = round2(selected.substituteTax + selected.deductibleContributionsPaid);
+  const nettoAnnuo = round2(gross - tasseContribAnnuo);
+
+  const monthly = data.monthly.map((m) => {
+    const ratio = gross > 0 ? m.lordo / gross : 0;
+    const tasseContrib = round2(tasseContribAnnuo * ratio);
+    const netto = round2(m.lordo - tasseContrib);
+    return { month: m.month, lordo: round2(m.lordo), netto, tasseContrib, fonte: 'Fattura' };
+  });
+
+  return c.json({
+    year,
+    needsConfig: false,
+    grossCollected: gross,
+    limite: FORFETTARIO_RULES.sogliaIngresso,
+    comparison,
+    monthly,
+    // Echo del netto annuo (derivabile dal FE, ma comodo per evitare drift di
+    // arrotondamento fra somma mensile e sintesi).
+    nettoAnnuo,
+  });
 });
