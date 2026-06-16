@@ -325,6 +325,11 @@ export const NotaCreditoCreateInput = z.object({
   note: z.string().trim().optional().nullable(),
 });
 
+// ───── Calendario (Slice A) ─────
+export const ActivityCodeEnum = z.enum(['8', 'M', 'F', 'FS', 'Malattia', 'Donazione', 'WE']);
+export const CalendarEntryInput = z.object({ activityCode: ActivityCodeEnum });
+export type CalendarEntryInputT = z.infer<typeof CalendarEntryInput>;
+
 // ───── Import XML FatturaPA (Slice 5E) ─────
 
 export const ImportClienteSnapshot = z.object({
