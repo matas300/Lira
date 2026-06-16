@@ -4,13 +4,12 @@
 // - esc(): escape HTML per OGNI dato dinamico interpolato in innerHTML
 //   (unica copia: prima era triplicata in modal/clienti/fatture).
 // - mountPage(): fattorizza il boilerplate di pagina autenticata
-//   (getMe → redirect login → shell sidebar+header+main+bottom-nav → wiring),
+//   (getMe → redirect login → shell sidebar+main → wiring),
 //   prima quadruplicato in dashboard/profiles/clienti/fatture.
 
 import { getMe } from './auth';
-import { renderHeader, wireHeader } from '../components/header';
 import { renderSidebar, wireSidebar } from '../components/sidebar';
-import { renderBottomNav } from '../components/bottom-nav';
+import { getYear } from './year';
 import type { MeResponse } from '@shared/types';
 
 /** Escape HTML — usare per ogni valore dinamico dentro template innerHTML. */
@@ -35,7 +34,7 @@ export interface PageCtx {
 
 export interface MountPageOpts {
   container: HTMLElement;
-  /** Route attiva, usata per lo stato attivo di sidebar/bottom-nav. */
+  /** Route attiva, usata per lo stato attivo di sidebar. */
   route: string;
   /** Render del contenuto pagina dentro ctx.main. */
   render: (ctx: PageCtx) => void | Promise<void>;
@@ -55,16 +54,13 @@ export function mountPage(opts: MountPageOpts): () => void {
 
     opts.container.innerHTML = `
       <div class="app-shell">
-        ${renderSidebar(opts.route)}
-        ${renderHeader(me)}
+        ${renderSidebar(me, opts.route, getYear())}
         <main class="app-main"></main>
-        ${renderBottomNav(opts.route)}
       </div>`;
 
     for (const fn of cleanups) fn();
     cleanups = [
-      wireHeader(opts.container, render),
-      wireSidebar(opts.container),
+      wireSidebar(opts.container, { onChanged: render }),
     ];
 
     const main = opts.container.querySelector<HTMLElement>('.app-main')!;
