@@ -17,7 +17,7 @@ import { api, ApiError } from '../lib/api';
 import { esc, mountPage } from '../lib/dom';
 import { getYear } from '../lib/year';
 import { scadenzaTiming } from '../lib/scadenza-timing';
-import { openModal, alertModal } from '../components/modal';
+import { openModal, alertModal, confirmModal } from '../components/modal';
 
 // ─── Tipi rispecchiati dall'endpoint (senza import da @server per evitare
 //     dipendenze da node_modules che non servono al client) ──────────────────
@@ -382,6 +382,18 @@ export function mount(container: HTMLElement): () => void {
           const idsStr = btn.dataset['ids'] ?? '';
           const ids = idsStr.split(',').filter(Boolean);
           if (!ids.length) return;
+
+          // Determina se la riga ha pagamenti misti (stessa record su più scadenze)
+          const idsSet = new Set(ids);
+          const row = view.rows.find((r) => r.payments.some((p) => idsSet.has(p.id)));
+          const hasMixed = row?.payments.some((p) => p.mode === 'mixed') ?? false;
+
+          const message = hasMixed
+            ? 'Uno o più versamenti di questa scadenza sono pagamenti misti, collegati anche ad altre scadenze. Annullando, il versamento verrà rimosso del tutto (anche dalle altre voci collegate). Continuare?'
+            : 'Annullare i versamenti registrati per questa scadenza?';
+
+          const confirmed = await confirmModal(message, { danger: true });
+          if (!confirmed) return;
 
           try {
             for (const id of ids) {
