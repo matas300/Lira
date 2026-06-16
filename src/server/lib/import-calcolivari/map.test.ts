@@ -43,6 +43,32 @@ test('mapAll: pagamento id deterministico + year da scheduleKey', () => {
   assert.match(p.id, /^[0-9a-f]{8}-/);
 });
 
+test('mapAll: fattura id namespaced per profilo (no collisione cross-profilo)', () => {
+  // Gli id CalcoliVari sono profile-local; fatture.id in Lira è PK globale.
+  const ex = extractAll(detect(sample()));
+  const a = mapAll(ex, { profileId: 'pA', userId: 'u', slug: 'a' }).rows.fatture[0]!;
+  const b = mapAll(ex, { profileId: 'pB', userId: 'u', slug: 'b' }).rows.fatture[0]!;
+  assert.notEqual(a.id, b.id);
+  assert.ok(a.id!.startsWith('pA_'));
+  assert.ok(b.id!.startsWith('pB_'));
+});
+
+test('mapAll: fatturaOriginaleId e ncIds namespaced come gli id fattura', () => {
+  const ex = extractAll(detect({
+    'calcoliPIVA_Mattia_fattureEmesse': [
+      { id: 'orig', annoProgressivo: 2025, progressivo: 1, data: '2025-01-01', totaleLordo: 100, righe: [] },
+      { id: 'nc', tipoDocumento: 'TD04', annoProgressivo: 2025, progressivo: 2, data: '2025-02-01', totaleLordo: 50, fatturaOriginaleId: 'orig', righe: [] },
+      { id: 'orig2', annoProgressivo: 2025, progressivo: 3, data: '2025-03-01', totaleLordo: 200, ncIds: ['nc'], righe: [] },
+    ],
+  }));
+  const rows = mapAll(ex, { profileId: 'pX', userId: 'u', slug: 'x' }).rows.fatture;
+  const nc = rows.find((f) => f.id === 'pX_nc')!;
+  const orig2 = rows.find((f) => f.id === 'pX_orig2')!;
+  assert.ok(rows.find((f) => f.id === 'pX_orig'));
+  assert.equal(nc.fatturaOriginaleId, 'pX_orig');
+  assert.deepEqual(JSON.parse(orig2.ncIds as string), ['pX_nc']);
+});
+
 test('mapAll: fattura numero_display in convenzione Lira YYYY/NNN', () => {
   const { rows } = mapAll(extractAll(detect(sample())), CTX);
   assert.equal(rows.fatture[0]!.numeroDisplay, '2025/7');

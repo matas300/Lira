@@ -34,6 +34,30 @@ test('buildImportPlan: merge longest-wins su due file', async () => {
   assert.equal(cli.pec, 'a@pec.it');
 });
 
+test('buildImportPlan: clienti duplicati (stessa P.IVA) unificati, clienteId fatture rimappato', async () => {
+  const db = await seed();
+  const exp = {
+    profile: 'Mattia',
+    keys: {
+      'calcoliPIVA_Mattia_clienti': [
+        { id: 'c1', nome: 'ACME SRL', partitaIva: 'IT123' },
+        { id: 'c2', nome: 'ACME SRL', partitaIva: 'IT123', pec: 'a@pec.it' }, // stesso cliente, più ricco
+      ],
+      'calcoliPIVA_Mattia_fattureEmesse': [
+        { id: 'f1', annoProgressivo: 2024, progressivo: 0, data: '2024-01-01', totaleLordo: 100, clienteId: 'c1', righe: [] },
+        { id: 'f2', annoProgressivo: 2024, progressivo: 0, data: '2024-02-01', totaleLordo: 200, clienteId: 'c2', righe: [] },
+      ],
+    },
+  };
+  const plan = await buildImportPlan(db, [exp], { userEmail: 'mattia@test.it' });
+  assert.equal(plan.entities['clienti']!.inserts.length, 1, 'i due clienti con stessa P.IVA sono unificati');
+  const kept = plan.entities['clienti']!.inserts[0];
+  assert.equal(kept.pec, 'a@pec.it', 'sopravvive il record più ricco');
+  const f = plan.entities['fatture']!.inserts;
+  assert.equal(f.length, 2);
+  assert.ok(f.every((x: any) => x.clienteId === kept.id), 'tutte le fatture puntano al cliente sopravvissuto');
+});
+
 test('buildImportPlan: fatture distinte con stesso progressivo (es. 0) sono rinumerate per anno/data, nessuna persa', async () => {
   const db = await seed();
   // 3 fatture 2024 + 2 fatture 2025, tutte con progressivo 0 (come i dati legacy reali).
@@ -54,15 +78,16 @@ test('buildImportPlan: fatture distinte con stesso progressivo (es. 0) sono rinu
   const ins = plan.entities['fatture']!.inserts;
   assert.equal(ins.length, 5, 'tutte le 5 fatture devono sopravvivere');
 
-  const byId = new Map(ins.map((f: any) => [f.id, f]));
-  // 2024: gen→1, feb→2, mar→3
-  assert.equal(byId.get('f-gen').progressivo, 1);
-  assert.equal(byId.get('f-feb').progressivo, 2);
-  assert.equal(byId.get('f-mar').progressivo, 3);
-  assert.equal(byId.get('f-mar').numeroDisplay, '2024/3');
-  // 2025: feb→1, giu→2
-  assert.equal(byId.get('f-2025a').progressivo, 1);
-  assert.equal(byId.get('f-2025b').progressivo, 2);
+  // lookup per importo (gli id vengono namespaced per profilo, vedi map.ts)
+  const byImp = new Map(ins.map((f: any) => [f.importo, f]));
+  // 2024: gen(100)→1, feb(200)→2, mar(300)→3
+  assert.equal(byImp.get(100).progressivo, 1);
+  assert.equal(byImp.get(200).progressivo, 2);
+  assert.equal(byImp.get(300).progressivo, 3);
+  assert.equal(byImp.get(300).numeroDisplay, '2024/3');
+  // 2025: feb(500)→1, giu(600)→2
+  assert.equal(byImp.get(500).progressivo, 1);
+  assert.equal(byImp.get(600).progressivo, 2);
   // chiavi (anno:progressivo) tutte uniche → niente collisione col vincolo unique
   const keys = ins.map((f: any) => `${f.annoProgressivo}:${f.progressivo}`);
   assert.equal(new Set(keys).size, keys.length);

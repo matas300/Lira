@@ -119,16 +119,53 @@ function renumberFattureByYear(rows: any[]): any[] {
   return out;
 }
 
+// Unifica i clienti per chiave naturale (P.IVA, poi CF): la stessa entità inserita
+// più volte (id diversi, tipico dei merge cross-device) violerebbe il vincolo unique
+// (profilo, partita_iva)/(profilo, codice_fiscale). Tiene il record più ricco e
+// restituisce una mappa idScartato→idTenuto per rimappare i riferimenti delle fatture.
+function dedupClientiByNaturalKey(rows: any[]): { clienti: any[]; idRemap: Map<string, string> } {
+  const naturalKey = (c: any) =>
+    c.partitaIva ? `piva:${c.partitaIva}` : c.codiceFiscale ? `cf:${c.codiceFiscale}` : `id:${c.id}`;
+  const byKey = new Map<string, any>();
+  const idRemap = new Map<string, string>();
+  for (const c of rows) {
+    const k = naturalKey(c);
+    const ex = byKey.get(k);
+    if (!ex) { byKey.set(k, c); continue; }
+    const keep = countNonNull(c) > countNonNull(ex) ? c : ex;
+    const drop = keep === c ? ex : c;
+    if (ex.isDefault || c.isDefault) keep.isDefault = 1; // preserva il flag default
+    if (drop.id !== keep.id) idRemap.set(drop.id, keep.id);
+    byKey.set(k, keep);
+  }
+  // Risolve eventuali catene di remap (A→B, B→C ⇒ A→C).
+  for (const [from] of idRemap) {
+    let to = idRemap.get(from)!;
+    while (idRemap.has(to)) to = idRemap.get(to)!;
+    idRemap.set(from, to);
+  }
+  return { clienti: [...byKey.values()], idRemap };
+}
+
 function mergeMapped(list: MappedRows[]): MappedRows {
   const concat = (sel: (m: MappedRows) => any[]) => list.flatMap(sel);
   const profilesMerged = list.map((m) => m.profiles[0]).filter(Boolean);
+
+  const { clienti, idRemap } = dedupClientiByNaturalKey(dedupRicher(concat((m) => m.clienti), (r) => r.id));
+
+  // Dedup fatture per id (non per anno:progressivo): fatture distinte non vanno
+  // collassate anche se condividono il progressivo. Poi rimappa i clienteId sui
+  // clienti unificati e rinumera per anno/data.
+  const fatture = dedupRicher(concat((m) => m.fatture), (r) => r.id);
+  for (const f of fatture) {
+    if (f.clienteId && idRemap.has(f.clienteId)) f.clienteId = idRemap.get(f.clienteId)!;
+  }
+
   return {
     profiles: profilesMerged.length ? [dedupRicher(profilesMerged, (p) => p.slug)[0]] : [],
     yearSettings: dedupRicher(concat((m) => m.yearSettings), (r) => `${r.year}`),
-    clienti: dedupRicher(concat((m) => m.clienti), (r) => r.id),
-    // Dedup per id (non per anno:progressivo): fatture distinte non vanno collassate
-    // anche se condividono il progressivo. Stesso id su più file → longest-wins.
-    fatture: renumberFattureByYear(dedupRicher(concat((m) => m.fatture), (r) => r.id)),
+    clienti,
+    fatture: renumberFattureByYear(fatture),
     pagamenti: dedupRicher(concat((m) => m.pagamenti), (r) => r.id),
     calendarEntries: dedupRicher(concat((m) => m.calendarEntries), (r) => `${r.year}:${r.month}:${r.day}`),
     budgetItems: dedupRicher(concat((m) => m.budgetItems), (r) => r.id),

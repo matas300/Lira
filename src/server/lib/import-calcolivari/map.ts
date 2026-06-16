@@ -90,7 +90,7 @@ export function mapAll(ex: ExtractedData, ctx: Ctx): { rows: MappedRows; issues:
     const anno = nn(f['annoProgressivo'] ?? f['anno']) ?? 0;
     const prog = nn(f['progressivo']) ?? 0;
     return {
-      id: ns(f['id']) ?? det('fattura', pid, anno, prog), profileId: pid, clienteId: ns(f['clienteId']),
+      id: `${pid}_${ns(f['id']) ?? det('fattura', pid, anno, prog)}`, profileId: pid, clienteId: ns(f['clienteId']),
       tipoDocumento: ns(f['tipoDocumento']) ?? 'TD01', annoProgressivo: anno, progressivo: prog, numeroDisplay: `${anno}/${prog}`,
       data: ns(f['data']) ?? `${anno || 1970}-${String(nn(f['pagMese']) ?? 1).padStart(2, '0')}-01`,
       clienteSnapshot: f['clienteSnapshot'] ? JSON.stringify(f['clienteSnapshot']) : null, righe: JSON.stringify(mapRighe(f['righe'])),
@@ -98,8 +98,8 @@ export function mapAll(ex: ExtractedData, ctx: Ctx): { rows: MappedRows; issues:
       ritenuta: nn(f['ritenuta']) ?? 0, aliquotaRitenuta: nn(f['aliquotaRitenuta']), tipoRitenuta: ns(f['tipoRitenuta']), causaleRitenuta: ns(f['causaleRitenuta']),
       contributoIntegrativo: nn(f['contributoIntegrativo']) ?? 0, marcaDaBollo: nb(f['marcaDaBollo']), bolloAddebitato: nb(f['bolloAddebitato']),
       stato: ns(f['stato']) ?? 'bozza', dataInvioSdi: ns(f['dataInvioSdi']), dataPagamento: ns(f['dataPagamento']), pagMese: nn(f['pagMese']), pagAnno: nn(f['pagAnno']),
-      modalitaPagamento: ns(f['modalitaPagamento']), fatturaOriginaleId: ns(f['fatturaOriginaleId']), tipoStorno: ns(f['tipoStorno']),
-      ncTotaleImporto: nn(f['ncTotaleImporto']) ?? 0, ncIds: f['ncIds'] ? JSON.stringify(f['ncIds']) : null, origine: ns(f['origine']) ?? 'manuale', note: ns(f['note']),
+      modalitaPagamento: ns(f['modalitaPagamento']), fatturaOriginaleId: f['fatturaOriginaleId'] ? `${pid}_${ns(f['fatturaOriginaleId'])}` : null, tipoStorno: ns(f['tipoStorno']),
+      ncTotaleImporto: nn(f['ncTotaleImporto']) ?? 0, ncIds: f['ncIds'] ? JSON.stringify((f['ncIds'] as any[]).map((x) => `${pid}_${x}`)) : null, origine: ns(f['origine']) ?? 'manuale', note: ns(f['note']),
     };
   }).filter((r) => validate(S.zFattura, r, 'fatture', r.numeroDisplay, issues));
 
