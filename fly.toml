@@ -3,8 +3,8 @@
 # Sostituisci `app = "lira"` con il nome reale prima di `fly launch`.
 # ────────────────────────────────────────────────────────────────────────────
 
-app = "lira"
-primary_region = "fra"  # Frankfurt — più vicino all'Italia
+app = "lira-piva"
+primary_region = "lhr"  # Londra — region disponibile più vicina al DB Turso (Ireland, eu-west-1)
 
 [build]
   dockerfile = "Dockerfile"
