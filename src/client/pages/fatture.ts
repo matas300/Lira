@@ -271,7 +271,9 @@ export function mount(container: HTMLElement): () => void {
 
   function lastDayOfMonth(year: number, month: number): string {
     const d = new Date(year, month, 0); // giorno 0 del mese successivo = ultimo del mese
-    return d.toISOString().slice(0, 10);
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${d.getFullYear()}-${mm}-${dd}`;
   }
 
   async function openDaCalendarioFlow(): Promise<void> {
@@ -308,7 +310,6 @@ export function mount(container: HTMLElement): () => void {
 
     // 2. Picker modal
     await new Promise<void>((resolvePicker) => {
-      let pickerClosed = false;
 
       function computeImportoRiga(gg: number, mezze: number, tariffa: number): number {
         return gg * tariffa + mezze * (tariffa / 2);
@@ -347,13 +348,10 @@ export function mount(container: HTMLElement): () => void {
           </div>`;
       }
 
-      let pickerClose: (() => void) | null = null;
-
       const pickerHandle = openModal({
         title: `Da calendario ${year}`,
         bodyHtml: buildPickerBody(tariffaGiornaliera),
         onMount: (root, close) => {
-          pickerClose = close;
 
           function getPickerTariffa(): number | null {
             const v = root.querySelector<HTMLInputElement>('[data-tariffa]')!.value.trim();
@@ -436,19 +434,14 @@ export function mount(container: HTMLElement): () => void {
               }
 
               // Chiudi picker e apri modal fattura
-              pickerClosed = true;
               close();
               openFatturaModal(undefined, draft);
             });
           });
         },
-        onClose: () => {
-          if (!pickerClosed) resolvePicker();
-          else resolvePicker();
-        },
+        onClose: () => resolvePicker(),
       });
       activeModalClose = pickerHandle.close;
-      void pickerClose; // usato nelle callback interne
     });
   }
 
