@@ -1,0 +1,4 @@
+# Export reali da CalcoliVari (dati fiscali) — mai committare.
+# Ignora tutto in questa cartella tranne questo .gitignore.
+*
+!.gitignore
