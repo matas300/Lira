@@ -1,0 +1,1 @@
+ALTER TABLE `year_settings` ADD `budget_base_month` integer;
