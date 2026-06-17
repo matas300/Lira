@@ -38,7 +38,11 @@ test('GET /api/budget/:year vuoto → baseMonth null, items []', async () => {
 });
 
 test('PUT poi GET → items e baseMonth coerenti, ordinati per ordine', async () => {
-  const { app, headers } = await makeApp();
+  const { app, db, headers, profileId } = await makeApp();
+  await db.insert(yearSettings).values({
+    profileId, year: 2026, regime: 'forfettario', coefficiente: 0.78,
+    impostaSostitutiva: 0.15, inpsMode: 'gestione_separata',
+  });
   const put = await app.request('/api/budget/2026', putBody({
     baseMonth: 4,
     items: [

@@ -90,27 +90,10 @@ budgetRoute.put('/:year', zJson(BudgetPutInput), async (c) => {
         })),
       );
     }
-    // Try to update existing row; if no row exists, insert one with safe defaults
-    // so that budgetBaseMonth is always persisted.
-    const updated = await tx
+    await tx
       .update(yearSettings)
       .set({ budgetBaseMonth: baseMonth })
       .where(and(eq(yearSettings.profileId, profileId), eq(yearSettings.year, year)));
-    // LibSQL returns { rowsAffected } — insert if no row was updated.
-    if (updated.rowsAffected === 0 && baseMonth !== null) {
-      await tx.insert(yearSettings).values({
-        profileId,
-        year,
-        regime: 'forfettario',
-        coefficiente: 0.78,
-        impostaSostitutiva: 0.15,
-        inpsMode: 'gestione_separata',
-        budgetBaseMonth: baseMonth,
-      }).onConflictDoUpdate({
-        target: [yearSettings.profileId, yearSettings.year],
-        set: { budgetBaseMonth: baseMonth },
-      });
-    }
   });
 
   const rows = await db
