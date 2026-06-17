@@ -29,7 +29,7 @@ function parseBlob(v: string | null): Record<string, unknown> {
   } catch { return {}; }
 }
 
-function resolveYear(raw: string): number {
+function parseYearParam(raw: string): number {
   const n = Number(raw);
   if (!Number.isInteger(n) || n < 2000 || n > 2100) {
     throw new HttpError(400, 'INVALID_YEAR', `Anno "${raw}" non valido.`);
@@ -40,7 +40,7 @@ function resolveYear(raw: string): number {
 dichiarazioneRoute.get('/:year', async (c) => {
   const db = c.get('db');
   const profileId = c.get('activeProfileId');
-  const year = resolveYear(c.req.param('year'));
+  const year = parseYearParam(c.req.param('year'));
 
   // loadScenarioData ritorna null se le year-settings dell'anno mancano → needsConfig.
   const data = await loadScenarioData(db, profileId, year);
