@@ -54,7 +54,10 @@ dichiarazioneRoute.get('/:year', async (c) => {
     .limit(1);
   if (!ysRow) return c.json({ year, needsConfig: true });
 
-  const selected = buildForfettarioMethodComparison(data.comparisonInput).selected;
+  // La dichiarazione è un documento CONSUNTIVO: uso lo scenario storico
+  // (reddito/imposta/contributi effettivi dell'anno), non il previsionale
+  // del piano acconti. I righi 6A sono comunque identici nei due scenari.
+  const scenario = buildForfettarioMethodComparison(data.comparisonInput).historical;
 
   const [prof] = await db.select().from(profiles).where(eq(profiles.id, profileId)).limit(1);
   if (!prof) throw new HttpError(404, 'PROFILE_NOT_FOUND', 'Profilo attivo non trovato');
@@ -70,7 +73,7 @@ dichiarazioneRoute.get('/:year', async (c) => {
   };
 
   const dichiarazione = buildDichiarazione({
-    year, scenario: selected, ys, anagrafica,
+    year, scenario, ys, anagrafica,
     dataInizioAttivita: attivita.data_inizio_attivita,
   });
 

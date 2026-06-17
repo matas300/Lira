@@ -61,3 +61,26 @@ test('GET /api/dichiarazione/:year → dichiarazione con quadri quando configura
   assert.ok(body.dichiarazione.quadroLM.length >= 8);
   assert.equal(body.dichiarazione.quadroRR.sezione, 'artigiani_commercianti');
 });
+
+test('GET /api/dichiarazione/:year → regime ordinario: warning REGIME_NON_FORFETTARIO, no crash', async () => {
+  const { db } = await createTestDb();
+  await createUserWithDefaultProfile({ db, email: 'a@b.it', password: 'pw-super-lunga-123', name: 'A' });
+  const app = makeApp(db);
+  const cookie = await login(app);
+  const [p] = await db.select().from(profiles).limit(1);
+  await db.update(profiles).set({
+    anagrafica: JSON.stringify({ cf: 'RSSMRA80A01H501U', nome: 'Mario', cognome: 'Rossi', data_nascita: '1980-01-01', residenza: { citta: 'Roma', provincia: 'RM' } }),
+  }).where(eq(profiles.id, p!.id));
+  await db.insert(yearSettings).values({
+    profileId: p!.id, year: 2025, regime: 'ordinario', coefficiente: 0.67,
+    impostaSostitutiva: 0.15, inpsMode: 'artigiani_commercianti', inpsCategoria: 'artigiano',
+    limiteForfettario: 85000, scadenziarioMetodo: 'storico',
+  });
+
+  const res = await app.request('/api/dichiarazione/2025', { headers: { cookie } });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.needsConfig, false);
+  assert.ok(body.dichiarazione.warnings.some((w: { code: string; severity: string }) => w.code === 'REGIME_NON_FORFETTARIO' && w.severity === 'error'));
+  assert.ok(body.dichiarazione.quadroLM.length >= 8); // non crasha, i quadri ci sono comunque
+});
