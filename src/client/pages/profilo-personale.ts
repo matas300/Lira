@@ -8,7 +8,7 @@
 import { api, ApiError } from '../lib/api';
 import { esc, mountPage } from '../lib/dom';
 import {
-  anagraficaDefaults, anagraficaFromResponse, anagraficaToBody, copyResidenzaToDomicilio,
+  anagraficaFromResponse, anagraficaToBody, copyResidenzaToDomicilio,
   fieldError, type AnagraficaState,
 } from '../lib/profile-form';
 
