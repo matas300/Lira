@@ -128,7 +128,7 @@ export function renderNeedsConfig(year: number): string {
   return `<div class="card tasse-needsconfig">
     <h2>Tasse Accantonate ${esc(year)}</h2>
     <p class="tasse-note">Non ci sono ancora impostazioni fiscali per il ${esc(year)}: configura il regime per calcolare la percentuale effettiva da accantonare.</p>
-    <a class="btn btn-primary" href="/" data-route="/">Configura il ${esc(year)}</a>
+    <a class="btn btn-primary" href="/impostazioni" data-route="/impostazioni">Configura il ${esc(year)}</a>
   </div>`;
 }
 

@@ -226,7 +226,7 @@ export function renderNeedsConfig(year: number): string {
   return `<div class="card regime-needsconfig">
       <h2>Regime Forfettario ${esc(year)}</h2>
       <p class="regime-note">Non ci sono ancora impostazioni fiscali per il ${esc(year)}: coefficiente, aliquota sostitutiva e gestione INPS servono per calcolare la tua posizione.</p>
-      <a class="btn btn-primary" href="/tasse" data-route="/tasse">Configura il ${esc(year)}</a>
+      <a class="btn btn-primary" href="/impostazioni" data-route="/impostazioni">Configura il ${esc(year)}</a>
     </div>`;
 }
 
