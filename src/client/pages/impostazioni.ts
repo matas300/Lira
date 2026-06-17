@@ -193,9 +193,16 @@ export function mount(container: HTMLElement): () => void {
         });
 
         bind('[data-field="coefficiente"]', (el) => Number((el as HTMLSelectElement).value), 'coefficiente');
-        bind('[data-field="inpsMode"]', (el) => (el as HTMLSelectElement).value as YsFormState['inpsMode'], 'inpsMode', true);
+        const inpsModeEl = main.querySelector<HTMLSelectElement>('[data-field="inpsMode"]');
+        inpsModeEl?.addEventListener('change', () => {
+          state.inpsMode = inpsModeEl.value as YsFormState['inpsMode'];
+          if (state.inpsMode === 'artigiani_commercianti' && state.inpsCategoria == null) {
+            state.inpsCategoria = 'artigiano';
+          }
+          render();
+        });
         bind('[data-field="inpsCategoria"]', (el) => (el as HTMLSelectElement).value as YsFormState['inpsCategoria'], 'inpsCategoria');
-        bind('[data-field="limiteForfettario"]', (el) => Number((el as HTMLInputElement).value) || 0, 'limiteForfettario');
+        bind('[data-field="limiteForfettario"]', (el) => { const v = (el as HTMLInputElement).value; return v === '' ? 85000 : Number(v); }, 'limiteForfettario');
         bind('[data-field="tariffaGiornaliera"]', (el) => { const v = (el as HTMLInputElement).value; return v === '' ? null : Number(v); }, 'tariffaGiornaliera');
         bind('[data-field="scadenziarioMetodo"]', (el) => (el as HTMLSelectElement).value as YsFormState['scadenziarioMetodo'], 'scadenziarioMetodo');
         bind('[data-field="prorogaSaldoAt"]', (el) => { const v = (el as HTMLInputElement).value; return v === '' ? null : v; }, 'prorogaSaldoAt');
@@ -227,8 +234,9 @@ export function mount(container: HTMLElement): () => void {
             if (m) { m.textContent = 'Salvato ✓'; m.className = 'ys-msg is-ok'; }
           } catch (err) {
             const text = err instanceof ApiError ? err.message : 'Errore durante il salvataggio.';
-            msgEl.textContent = text;
-            msgEl.className = 'ys-msg is-err';
+            const live = main.querySelector<HTMLElement>('[data-ys-msg]') ?? msgEl;
+            live.textContent = text;
+            live.className = 'ys-msg is-err';
           }
         });
       }
