@@ -154,6 +154,14 @@ export function isCoefficienteAmmesso(c: number): boolean {
 }
 
 /**
+ * Gruppi ATECO per la UI (label + coefficiente), senza i `ranges` interni.
+ * Usato dall'editor parametri per il select del coefficiente.
+ */
+export function atecoGruppiUI(): ReadonlyArray<{ label: string; coefficiente: CoefficienteAmmesso }> {
+  return GRUPPI_ATECO.map((g) => ({ label: g.label, coefficiente: g.coefficiente }));
+}
+
+/**
  * Risolve il coefficiente di redditività per un codice ATECO completo
  * `NN.NN.NN`. Ritorna `null` se il formato è invalido oppure se il codice
  * non rientra in alcun gruppo del DM (caso teorico: la copertura DM è
