@@ -47,6 +47,24 @@ test('bodyFromState: riduzione disattiva → comunicata 0 e data null', () => {
   assert.equal(b.riduzione35DataComunicazione, null);
 });
 
+test('stateFromResponse: campi opzionali null restano null (no coercizione a 0)', () => {
+  const s = stateFromResponse({
+    regime: 'forfettario', coefficiente: 0.78, impostaSostitutiva: 0.15,
+    inpsMode: 'gestione_separata', inpsCategoria: null,
+    riduzione35: 0, riduzione35Comunicata: 0, riduzione35DataComunicazione: null,
+    haRedditoDipendente: 0, limiteForfettario: 85000, scadenziarioMetodo: 'storico',
+    prorogaSaldoAt: null, tariffaGiornaliera: null,
+    primoAnnoFatturatoPrec: null, primoAnnoImpostaPrec: null, primoAnnoAccontiImpostaPrec: null,
+    primoAnnoContribVariabiliPrec: null, primoAnnoAccontiContribPrec: null,
+  });
+  assert.equal(s.tariffaGiornaliera, null);
+  assert.equal(s.primoAnnoFatturatoPrec, null);
+  assert.equal(s.primoAnnoAccontiContribPrec, null);
+  // ma uno zero esplicito resta 0
+  const z = stateFromResponse({ tariffaGiornaliera: 0 } as Record<string, unknown>);
+  assert.equal(z.tariffaGiornaliera, 0);
+});
+
 test('atecoOptions / selectedAtecoIndex: pre-seleziona il primo gruppo col coefficiente dato', () => {
   const opts = atecoOptions();
   assert.ok(opts.length >= 6);
