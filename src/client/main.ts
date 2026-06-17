@@ -15,7 +15,7 @@ const routes: Record<string, () => Promise<PageModule>> = {
   '/scadenze': () => import('./pages/scadenze'),
   '/calendario': () => import('./pages/calendario'),
   '/budget': () => import('./pages/budget'),
-  '/dichiarazione': () => import('./pages/placeholder'),
+  '/dichiarazione': () => import('./pages/dichiarazione'),
   '/impostazioni': () => import('./pages/impostazioni'),
   '/riepilogo': () => import('./pages/riepilogo'),
   '/profilo-personale': () => import('./pages/profilo-personale'),
