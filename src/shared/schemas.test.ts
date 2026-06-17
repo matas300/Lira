@@ -175,3 +175,34 @@ test('BudgetItemInput rifiuta importo negativo', () => {
     false,
   );
 });
+
+// ───── Editor profilo (anagrafica/attività/patch) ─────
+import { ProfileAnagrafica, ProfileAttivita, ProfilePatchInput } from './schemas';
+
+test('ProfileAnagrafica — tutto opzionale, vuoto valido', () => {
+  assert.deepEqual(ProfileAnagrafica.parse({}), {});
+  const r = ProfileAnagrafica.parse({
+    nome: 'Mario', cognome: 'Rossi', cf: 'rssmra80a01h501u',
+    residenza: { indirizzo: 'Via Roma 1', cap: '00100', citta: 'Roma', provincia: 'rm' },
+  });
+  assert.equal(r.nome, 'Mario');
+  assert.equal(r.cf, 'RSSMRA80A01H501U');      // CF normalizzato uppercase
+  assert.equal(r.residenza?.provincia, 'RM');  // provincia uppercase
+});
+
+test('ProfileAttivita — partita_iva e ateco opzionali, regime_default NON nello schema', () => {
+  const r = ProfileAttivita.parse({ partita_iva: '00743110157', codice_ateco: '62.01.00' });
+  assert.equal(r.partita_iva, '00743110157');
+  assert.equal('regime_default' in r, false);  // preservato lato server, non in input
+});
+
+test('ProfilePatchInput — campi tutti opzionali (patch parziale)', () => {
+  assert.deepEqual(ProfilePatchInput.parse({}), {});
+  const r = ProfilePatchInput.parse({ displayName: 'Mattia', giorniIncasso: 45 });
+  assert.equal(r.displayName, 'Mattia');
+  assert.equal(r.giorniIncasso, 45);
+});
+
+test('ProfilePatchInput — giorniIncasso negativo → errore', () => {
+  assert.throws(() => ProfilePatchInput.parse({ giorniIncasso: -1 }));
+});
