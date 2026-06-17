@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildQuadroLM } from './dichiarazione-engine';
+import { buildQuadroLM, buildQuadroRR, buildQuadroRX, buildQuadroRS } from './dichiarazione-engine';
 import type { ForfettarioScenario } from './tax-engine';
 
 // Scenario sintetico coi soli campi usati dal motore dichiarazione.
@@ -13,6 +13,7 @@ function fakeScenario(over: Partial<ForfettarioScenario> = {}): ForfettarioScena
     taxableBase: 16100,                   // 20100 − 4000
     substituteTax: 2415,                  // 16100 × 0.15
     taxSaldo: 1415,                       // dopo 1000 di acconti reali
+    // 6A non legge gli acconti: shape placeholder (l'AccontoPlan reale serve in 6B/RR-acconti).
     taxAccontoBase: 2415, taxAcconti: { acc1: 0, acc2: 0, total: 0 } as never,
     contributiVariabiliDovuti: 1200,
     contributionSaldo: 0, contributionAccontoBase: 0,
@@ -43,4 +44,30 @@ test('buildQuadroLM: mappa i righi chiave dallo scenario', () => {
 test('buildQuadroLM: acconti (LM43) mai negativi', () => {
   const righi = buildQuadroLM(fakeScenario({ substituteTax: 500, taxSaldo: 500 }));
   assert.equal(righi.find((r) => r.key === 'LM43')!.value, 0);
+});
+
+test('buildQuadroRR: gestione separata → contributi dovuti dai variabili, niente fissi', () => {
+  const q = buildQuadroRR(fakeScenario(), 'gestione_separata');
+  assert.equal(q.sezione, 'gestione_separata');
+  const dovuti = q.righi.find((r) => r.key === 'RR_GS_DOVUTI')!;
+  assert.equal(dovuti.value, 1200); // contributiVariabiliDovuti
+  assert.ok(!q.righi.some((r) => r.key === 'RR_FISSI'));
+});
+
+test('buildQuadroRR: artigiani/commercianti → fissi + variabili + totale', () => {
+  const q = buildQuadroRR(fakeScenario(), 'artigiani_commercianti');
+  assert.equal(q.sezione, 'artigiani_commercianti');
+  assert.equal(q.righi.find((r) => r.key === 'RR_FISSI')!.value, 4000); // 800 + 3200
+  assert.equal(q.righi.find((r) => r.key === 'RR_VARIABILI')!.value, 1200);
+  assert.equal(q.righi.find((r) => r.key === 'RR_TOTALE')!.value, 5200);
+});
+
+test('buildQuadroRX: credito anno prec a 0 (6A), source zero', () => {
+  const righi = buildQuadroRX();
+  assert.equal(righi.find((r) => r.key === 'RX1')!.value, 0);
+  assert.equal(righi.find((r) => r.key === 'RX1')!.source, 'zero');
+});
+
+test('buildQuadroRS: vuoto in 6A (informativo, popolato in 6C)', () => {
+  assert.deepEqual(buildQuadroRS(), []);
 });

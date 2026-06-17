@@ -68,6 +68,9 @@ export interface DichiarazioneInput {
   dataInizioAttivita?: string;
 }
 
+// r2: rete di sicurezza a 2 decimali. NON usa ceil2 come il tax-engine perché
+// questo layer NON arrotonda fiscalmente — i valori autoritativi arrivano già
+// ceil2 dallo scenario; qui si mappa soltanto.
 function r2(n: number): number {
   return Math.round((Number(n) || 0) * 100) / 100;
 }
@@ -89,4 +92,40 @@ export function buildQuadroLM(s: ForfettarioScenario): Rigo[] {
     rigo('LM43', 'Acconti versati', accontiImputati),
     rigo('LM45', 'Imposta sostitutiva a debito (saldo)', s.taxSaldo),
   ];
+}
+
+/** Quadro RR (INPS): ramo gestione separata (sez. II) o artigiani/commercianti (sez. I). */
+export function buildQuadroRR(s: ForfettarioScenario, inpsMode: string): QuadroRR {
+  if (inpsMode === 'gestione_separata') {
+    return {
+      sezione: 'gestione_separata',
+      righi: [
+        rigo('RR_GS_BASE', 'Reddito imponibile previdenziale', s.forfettarioGrossIncome),
+        rigo('RR_GS_DOVUTI', 'Contributi dovuti (gestione separata)', s.contributiVariabiliDovuti),
+      ],
+    };
+  }
+  const fissi = s.previousFixedTail + s.currentFixedWithinYear;
+  const variabili = s.contributiVariabiliDovuti;
+  return {
+    sezione: 'artigiani_commercianti',
+    righi: [
+      rigo('RR_FISSI', 'Contributi sul minimale (quote fisse dell\'anno)', fissi),
+      rigo('RR_VARIABILI', 'Contributi eccedenti il minimale', variabili),
+      rigo('RR_TOTALE', 'Totale contributi dovuti', fissi + variabili),
+    ],
+  };
+}
+
+/** Quadro RX (compensazioni): in 6A nessun credito da anno precedente (→ 6C). */
+export function buildQuadroRX(): Rigo[] {
+  return [
+    rigo('RX1', 'Credito da anno precedente', 0, 'zero'),
+    rigo('RX4', 'Credito da riportare al periodo successivo', 0, 'zero'),
+  ];
+}
+
+/** Quadro RS (dati informativi forfettari): vuoto in 6A (override informativi → 6C). */
+export function buildQuadroRS(): Rigo[] {
+  return [];
 }
