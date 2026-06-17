@@ -129,3 +129,64 @@ export function buildQuadroRX(): Rigo[] {
 export function buildQuadroRS(): Rigo[] {
   return [];
 }
+
+function yearOf(iso: string | undefined): number | null {
+  if (!iso || !/^\d{4}/.test(iso)) return null;
+  return Number(iso.slice(0, 4));
+}
+
+/** Frontespizio: contribuente dal profilo (anagrafica). Campi mancanti → '' (warning). */
+export function buildFrontespizio(inp: DichiarazioneInput): Frontespizio {
+  const a = inp.anagrafica;
+  return {
+    codiceFiscale: (a.cf ?? '').toUpperCase(),
+    cognome: a.cognome ?? '',
+    nome: a.nome ?? '',
+    dataNascita: a.data_nascita ?? '',
+    comune: a.residenza?.citta ?? '',
+    provincia: (a.residenza?.provincia ?? '').toUpperCase(),
+    annoImposta: inp.year,
+    regime: 'RF19',
+    tipoDichiarazione: 'ordinaria',
+  };
+}
+
+/** Validazione fiscale → warning (error bloccanti per la compilazione, warn/info no). */
+export function buildWarnings(inp: DichiarazioneInput): DichiarazioneWarning[] {
+  const w: DichiarazioneWarning[] = [];
+  const a = inp.anagrafica;
+
+  if (inp.ys.regime !== 'forfettario') {
+    w.push({ code: 'REGIME_NON_FORFETTARIO', severity: 'error', message: 'Il regime dell\'anno non è forfettario: questa dichiarazione copre solo RF19.' });
+  }
+  if (!a.cf || !(a.nome && a.cognome) || !a.data_nascita) {
+    w.push({ code: 'FRONTESPIZIO_INCOMPLETO', severity: 'error', message: 'Anagrafica incompleta (codice fiscale, nome/cognome, data di nascita): completala nel Profilo personale.' });
+  }
+  const redditoLordo = inp.scenario.forfettarioGrossIncome;
+  const limite = inp.ys.limiteForfettario || 85000;
+  if (redditoLordo > limite + 15000) {
+    w.push({ code: 'SOGLIA_100K', severity: 'warn', message: `Reddito lordo oltre ${limite + 15000} €: decadenza immediata dal forfettario nell'anno corrente (L. 197/2022).` });
+  } else if (redditoLordo > limite) {
+    w.push({ code: 'SOGLIA_85K', severity: 'warn', message: `Reddito lordo oltre ${limite} €: decadenza dal forfettario dall'anno successivo.` });
+  }
+  if (inp.ys.impostaSostitutiva === 0.05) {
+    const annoInizio = yearOf(inp.dataInizioAttivita);
+    if (annoInizio !== null && inp.year - annoInizio > 4) {
+      w.push({ code: 'STARTUP_5PCT_SCADUTO', severity: 'warn', message: 'Aliquota startup 5% applicata ma sono trascorsi più di 5 anni dall\'apertura della P.IVA (art. 1 c. 65 L. 190/2014): verifica.' });
+    }
+  }
+  w.push({ code: 'RS_INFORMATIVO', severity: 'info', message: 'Quadro RS: i dati sono solo informativi e NON deducono dal reddito forfettario.' });
+  return w;
+}
+
+/** Assembla la dichiarazione completa dai dati dell'anno. */
+export function buildDichiarazione(inp: DichiarazioneInput): Dichiarazione {
+  return {
+    frontespizio: buildFrontespizio(inp),
+    quadroLM: buildQuadroLM(inp.scenario),
+    quadroRR: buildQuadroRR(inp.scenario, inp.ys.inpsMode),
+    quadroRX: buildQuadroRX(),
+    quadroRS: buildQuadroRS(),
+    warnings: buildWarnings(inp),
+  };
+}

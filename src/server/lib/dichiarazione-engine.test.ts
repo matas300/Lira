@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildQuadroLM, buildQuadroRR, buildQuadroRX, buildQuadroRS } from './dichiarazione-engine';
+import { buildFrontespizio, buildWarnings, buildDichiarazione } from './dichiarazione-engine';
+import type { DichiarazioneInput, DichiarazioneYsView } from './dichiarazione-engine';
 import type { ForfettarioScenario } from './tax-engine';
 
 // Scenario sintetico coi soli campi usati dal motore dichiarazione.
@@ -70,4 +72,60 @@ test('buildQuadroRX: credito anno prec a 0 (6A), source zero', () => {
 
 test('buildQuadroRS: vuoto in 6A (informativo, popolato in 6C)', () => {
   assert.deepEqual(buildQuadroRS(), []);
+});
+
+const ysBase: DichiarazioneYsView = {
+  regime: 'forfettario', inpsMode: 'artigiani_commercianti',
+  impostaSostitutiva: 0.15, coefficiente: 0.67, limiteForfettario: 85000,
+};
+function input(over: Partial<DichiarazioneInput> = {}): DichiarazioneInput {
+  return {
+    year: 2025, scenario: fakeScenario(), ys: ysBase,
+    anagrafica: { cf: 'RSSMRA80A01H501U', nome: 'Mario', cognome: 'Rossi', data_nascita: '1980-01-01', residenza: { citta: 'Roma', provincia: 'RM' } },
+    dataInizioAttivita: '2022-01-01',
+    ...over,
+  };
+}
+
+test('buildFrontespizio: campi dal profilo, regime RF19', () => {
+  const f = buildFrontespizio(input());
+  assert.equal(f.codiceFiscale, 'RSSMRA80A01H501U');
+  assert.equal(f.cognome, 'Rossi');
+  assert.equal(f.annoImposta, 2025);
+  assert.equal(f.regime, 'RF19');
+});
+
+test('buildWarnings: frontespizio incompleto → error', () => {
+  const w = buildWarnings(input({ anagrafica: { nome: 'Mario' } }));
+  assert.ok(w.some((x) => x.code === 'FRONTESPIZIO_INCOMPLETO' && x.severity === 'error'));
+});
+
+test('buildWarnings: regime non forfettario → error', () => {
+  const w = buildWarnings(input({ ys: { ...ysBase, regime: 'ordinario' } }));
+  assert.ok(w.some((x) => x.code === 'REGIME_NON_FORFETTARIO' && x.severity === 'error'));
+});
+
+test('buildWarnings: reddito lordo oltre 85k → warn; oltre 100k → warn aggiuntivo', () => {
+  const w85 = buildWarnings(input({ scenario: fakeScenario({ forfettarioGrossIncome: 90000 }) }));
+  assert.ok(w85.some((x) => x.code === 'SOGLIA_85K'));
+  const w100 = buildWarnings(input({ scenario: fakeScenario({ forfettarioGrossIncome: 101000 }) }));
+  assert.ok(w100.some((x) => x.code === 'SOGLIA_100K'));
+});
+
+test('buildWarnings: startup 5% oltre 5 anni → warn', () => {
+  const w = buildWarnings(input({ ys: { ...ysBase, impostaSostitutiva: 0.05 }, dataInizioAttivita: '2018-01-01' }));
+  assert.ok(w.some((x) => x.code === 'STARTUP_5PCT_SCADUTO'));
+});
+
+test('buildWarnings: RS informativo sempre info', () => {
+  assert.ok(buildWarnings(input()).some((x) => x.code === 'RS_INFORMATIVO' && x.severity === 'info'));
+});
+
+test('buildDichiarazione: assembla tutti i quadri', () => {
+  const d = buildDichiarazione(input());
+  assert.equal(d.quadroLM.length, 8);
+  assert.equal(d.quadroRR.sezione, 'artigiani_commercianti');
+  assert.equal(d.quadroRX.length, 2);
+  assert.equal(d.frontespizio.regime, 'RF19');
+  assert.ok(Array.isArray(d.warnings));
 });
