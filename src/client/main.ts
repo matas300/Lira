@@ -18,8 +18,8 @@ const routes: Record<string, () => Promise<PageModule>> = {
   '/dichiarazione': () => import('./pages/placeholder'),
   '/impostazioni': () => import('./pages/impostazioni'),
   '/riepilogo': () => import('./pages/placeholder'),
-  '/profilo-personale': () => import('./pages/placeholder'),
-  '/profilo-piva': () => import('./pages/placeholder'),
+  '/profilo-personale': () => import('./pages/profilo-personale'),
+  '/profilo-piva': () => import('./pages/profilo-piva'),
 };
 
 const PUBLIC_ROUTES = new Set(['/login']);
