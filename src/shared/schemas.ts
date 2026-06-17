@@ -47,24 +47,26 @@ export const ProfileCreateInput = z.object({
 // Editor profilo (anagrafica/attività): tutti i campi opzionali, stringa vuota
 // ammessa (postura permissiva — la validazione di formato è inline lato client,
 // il blocco duro resta al confine XML in shared/cedente.ts).
+// NB: a differenza di optStr (top-level, usato dagli schemi cliente) optProfileStr NON
+// fa trim e non è nullable, ma ha max(200) e ammette stringa vuota (postura permissiva editor profilo).
 const optProfileStr = z.string().max(200).optional();
-const profileUpper = (s: string | undefined) => (s == null ? s : s.toUpperCase().trim());
+const optUpper = z.string().max(200).optional().transform((s) => (s == null ? s : s.trim().toUpperCase()));
 
 const Indirizzo = z.object({
   indirizzo: optProfileStr,
   cap: optProfileStr,
   citta: optProfileStr,
-  provincia: z.string().max(200).optional().transform(profileUpper),
+  provincia: optUpper,
 });
 
 export const ProfileAnagrafica = z.object({
-  cf: z.string().max(200).optional().transform(profileUpper),
+  cf: optUpper,
   nome: optProfileStr,
   cognome: optProfileStr,
   sesso: optProfileStr,
   data_nascita: optProfileStr,
   comune_nascita: optProfileStr,
-  prov_nascita: z.string().max(200).optional().transform(profileUpper),
+  prov_nascita: optUpper,
   residenza: Indirizzo.optional(),
   domicilio_fiscale: Indirizzo.optional(),
   telefono: optProfileStr,
