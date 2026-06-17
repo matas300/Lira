@@ -10,7 +10,7 @@ import { api, ApiError } from '../lib/api';
 import { esc, mountPage } from '../lib/dom';
 import { atecoGruppiUI } from '@shared/ateco-coefficienti';
 import {
-  attivitaDefaults, attivitaFromResponse, attivitaToBody, fieldError, type AttivitaState,
+  attivitaFromResponse, attivitaToBody, fieldError, type AttivitaState,
 } from '../lib/profile-form';
 
 // ── render puri ──
@@ -23,6 +23,9 @@ function txt(field: string, label: string, value: string, attrs = ''): string {
   </div>`;
 }
 
+// NB: il <select> valorizza ateco_gruppo col COEFFICIENTE (es. "0.78"), non con
+// un id-gruppo DM. È metadato descrittivo: il coefficiente autoritativo per il
+// calcolo vive in year_settings.coefficiente (editor /impostazioni).
 function atecoSelect(selected: string): string {
   const opts = atecoGruppiUI().map((g) => {
     const val = String(g.coefficiente); // es. "0.78"
@@ -73,4 +76,84 @@ export function renderPage(s: AttivitaState, giorniIncasso: number): string {
     <h2>Profilo P.IVA</h2>
     ${renderForm(s, giorniIncasso)}
   </div>`;
+}
+
+// ── mount ──
+
+interface ActiveProfileResponse {
+  profile: { giorniIncasso: number; attivita: Record<string, unknown> };
+}
+
+export function mount(container: HTMLElement): () => void {
+  return mountPage({
+    container,
+    route: '/profilo-piva',
+    render: async ({ main }) => {
+      main.innerHTML = `<div class="card ys-note">Carico il profilo…</div>`;
+
+      let giorni = 30;
+      let state: AttivitaState;
+      try {
+        const resp = await api.get<ActiveProfileResponse>('/api/profiles/active');
+        giorni = resp.profile.giorniIncasso;
+        state = attivitaFromResponse(resp.profile.attivita);
+      } catch (err) {
+        const msg = err instanceof ApiError ? err.message : 'Impossibile caricare il profilo. Riprova.';
+        main.innerHTML = `<div class="card ys-note ys-note-warn">${esc(msg)}</div>`;
+        return;
+      }
+
+      function validateAll(): void {
+        const el = main.querySelector<HTMLElement>('[data-err="partita_iva"]');
+        if (el) el.textContent = fieldError('partita_iva', state.partita_iva) ?? '';
+      }
+
+      function render(): void {
+        main.innerHTML = renderPage(state, giorni);
+        const form = main.querySelector<HTMLFormElement>('[data-pf-form]')!;
+        const msgEl = main.querySelector<HTMLElement>('[data-pf-msg]')!;
+
+        main.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-field]').forEach((el) => {
+          const field = el.dataset['field']!;
+          el.addEventListener('input', () => {
+            if (field === 'giorniIncasso') { giorni = Number((el as HTMLInputElement).value) || 0; return; }
+            (state as unknown as Record<string, string>)[field] = el.value;
+            validateAll();
+          });
+          // i <select> emettono 'change', non 'input' in alcuni browser: copri entrambi
+          el.addEventListener('change', () => {
+            if (field === 'giorniIncasso') { giorni = Number((el as HTMLInputElement).value) || 0; return; }
+            (state as unknown as Record<string, string>)[field] = el.value;
+          });
+        });
+
+        main.querySelector<HTMLButtonElement>('[data-pf-reset]')?.addEventListener('click', () => render());
+
+        form.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          msgEl.textContent = 'Salvataggio…';
+          msgEl.className = 'ys-msg';
+          try {
+            const resp = await api.patch<ActiveProfileResponse>('/api/profiles/active', {
+              giorniIncasso: giorni,
+              attivita: attivitaToBody(state),
+            });
+            giorni = resp.profile.giorniIncasso;
+            state = attivitaFromResponse(resp.profile.attivita);
+            render();
+            const m = main.querySelector<HTMLElement>('[data-pf-msg]');
+            if (m) { m.textContent = 'Salvato ✓'; m.className = 'ys-msg is-ok'; }
+          } catch (err) {
+            const text = err instanceof ApiError ? err.message : 'Errore durante il salvataggio.';
+            msgEl.textContent = text;
+            msgEl.className = 'ys-msg is-err';
+          }
+        });
+
+        validateAll();
+      }
+
+      render();
+    },
+  });
 }
