@@ -44,6 +44,53 @@ export const ProfileCreateInput = z.object({
   displayName: z.string().min(1).max(100),
 });
 
+// Editor profilo (anagrafica/attività): tutti i campi opzionali, stringa vuota
+// ammessa (postura permissiva — la validazione di formato è inline lato client,
+// il blocco duro resta al confine XML in shared/cedente.ts).
+// NB: a differenza di optStr (top-level, usato dagli schemi cliente) optProfileStr NON
+// fa trim e non è nullable, ma ha max(200) e ammette stringa vuota (postura permissiva editor profilo).
+const optProfileStr = z.string().max(200).optional();
+const optUpper = z.string().max(200).optional().transform((s) => (s == null ? s : s.trim().toUpperCase()));
+
+const Indirizzo = z.object({
+  indirizzo: optProfileStr,
+  cap: optProfileStr,
+  citta: optProfileStr,
+  provincia: optUpper,
+});
+
+export const ProfileAnagrafica = z.object({
+  cf: optUpper,
+  nome: optProfileStr,
+  cognome: optProfileStr,
+  sesso: optProfileStr,
+  data_nascita: optProfileStr,
+  comune_nascita: optProfileStr,
+  prov_nascita: optUpper,
+  residenza: Indirizzo.optional(),
+  domicilio_fiscale: Indirizzo.optional(),
+  telefono: optProfileStr,
+  email: optProfileStr,
+  iban: optProfileStr,
+  modalita_pagamento: optProfileStr,
+});
+
+export const ProfileAttivita = z.object({
+  partita_iva: optProfileStr,
+  codice_ateco: optProfileStr,
+  ateco_gruppo: optProfileStr,
+  descrizione_attivita: optProfileStr,
+  comune_domicilio: optProfileStr,
+  data_inizio_attivita: optProfileStr,
+});
+
+export const ProfilePatchInput = z.object({
+  displayName: z.string().min(1).max(100).optional(),
+  giorniIncasso: z.number().int().min(0).max(365).optional(),
+  anagrafica: ProfileAnagrafica.optional(),
+  attivita: ProfileAttivita.optional(),
+});
+
 // ───── Error envelope ─────
 export const ErrorEnvelope = z.object({
   error: z.object({

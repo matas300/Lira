@@ -8,6 +8,8 @@ import { profilesRoute } from './profiles';
 import { authRoute } from './auth';
 import { errorHandler } from '../middleware/error';
 import type { AuthEnv } from '../middleware/auth';
+import { profiles } from '../db/schema';
+import { eq } from 'drizzle-orm';
 
 function makeApp(db: import('../db/client').Db) {
   const app = new Hono<AuthEnv>();
@@ -116,4 +118,115 @@ test('POST /api/profiles/:slug/activate con slug inesistente → 404', async () 
   const cookie = await login(app);
   const res = await app.request('/api/profiles/ghost/activate', { method: 'POST', headers: { cookie } });
   assert.equal(res.status, 404);
+});
+
+test('GET /api/profiles/active ritorna il profilo attivo con blob parsati', async () => {
+  const { db } = await createTestDb();
+  await createUserWithDefaultProfile({ db, email: 'a@b.it', password: 'pw-super-lunga-123', name: 'A' });
+  const app = makeApp(db);
+  const cookie = await login(app);
+
+  // semina blob JSON sul profilo default
+  const [p] = await db.select().from(profiles).limit(1);
+  await db.update(profiles).set({
+    anagrafica: JSON.stringify({ nome: 'Mario', residenza: { citta: 'Roma' } }),
+    attivita: JSON.stringify({ partita_iva: '00743110157', regime_default: 'forfettario' }),
+  }).where(eq(profiles.id, p!.id));
+
+  const res = await app.request('/api/profiles/active', { headers: { cookie } });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.profile.slug, 'default');
+  assert.equal(body.profile.anagrafica.nome, 'Mario');
+  assert.equal(body.profile.anagrafica.residenza.citta, 'Roma');
+  assert.equal(body.profile.attivita.partita_iva, '00743110157');
+  assert.equal(body.profile.attivita.regime_default, 'forfettario');
+});
+
+test('GET /api/profiles/active con blob null/malformato → oggetti vuoti', async () => {
+  const { db } = await createTestDb();
+  await createUserWithDefaultProfile({ db, email: 'a@b.it', password: 'pw-super-lunga-123', name: 'A' });
+  const app = makeApp(db);
+  const cookie = await login(app);
+  const [p] = await db.select().from(profiles).limit(1);
+  await db.update(profiles).set({ anagrafica: 'not-json{', attivita: null }).where(eq(profiles.id, p!.id));
+
+  const res = await app.request('/api/profiles/active', { headers: { cookie } });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.deepEqual(body.profile.anagrafica, {});
+  assert.deepEqual(body.profile.attivita, {});
+});
+
+test('PATCH /api/profiles/active aggiorna anagrafica e displayName', async () => {
+  const { db } = await createTestDb();
+  await createUserWithDefaultProfile({ db, email: 'a@b.it', password: 'pw-super-lunga-123', name: 'A' });
+  const app = makeApp(db);
+  const cookie = await login(app);
+  const res = await app.request('/api/profiles/active', {
+    method: 'PATCH',
+    headers: { cookie, 'content-type': 'application/json' },
+    body: JSON.stringify({ displayName: 'Mattia', anagrafica: { nome: 'Mattia', cf: 'rssmra80a01h501u' } }),
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.profile.displayName, 'Mattia');
+  assert.equal(body.profile.anagrafica.nome, 'Mattia');
+  assert.equal(body.profile.anagrafica.cf, 'RSSMRA80A01H501U');
+});
+
+test('PATCH attivita preserva regime_default e chiavi extra non gestite dal form', async () => {
+  const { db } = await createTestDb();
+  await createUserWithDefaultProfile({ db, email: 'a@b.it', password: 'pw-super-lunga-123', name: 'A' });
+  const app = makeApp(db);
+  const cookie = await login(app);
+  const [p] = await db.select().from(profiles).limit(1);
+  await db.update(profiles).set({
+    attivita: JSON.stringify({ partita_iva: 'old', regime_default: 'forfettario', agevolazione_startup: true }),
+  }).where(eq(profiles.id, p!.id));
+
+  const res = await app.request('/api/profiles/active', {
+    method: 'PATCH',
+    headers: { cookie, 'content-type': 'application/json' },
+    body: JSON.stringify({ attivita: { partita_iva: '00743110157' } }),
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.profile.attivita.partita_iva, '00743110157');     // aggiornato
+  assert.equal(body.profile.attivita.regime_default, 'forfettario');  // preservato
+  assert.equal(body.profile.attivita.agevolazione_startup, true);     // preservato
+});
+
+test('PATCH parziale: solo giorniIncasso non tocca i blob', async () => {
+  const { db } = await createTestDb();
+  await createUserWithDefaultProfile({ db, email: 'a@b.it', password: 'pw-super-lunga-123', name: 'A' });
+  const app = makeApp(db);
+  const cookie = await login(app);
+  const [p] = await db.select().from(profiles).limit(1);
+  await db.update(profiles).set({ anagrafica: JSON.stringify({ nome: 'X' }) }).where(eq(profiles.id, p!.id));
+
+  const res = await app.request('/api/profiles/active', {
+    method: 'PATCH',
+    headers: { cookie, 'content-type': 'application/json' },
+    body: JSON.stringify({ giorniIncasso: 60 }),
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.profile.giorniIncasso, 60);
+  assert.equal(body.profile.anagrafica.nome, 'X'); // intatto
+});
+
+test('PATCH con body invalido (giorniIncasso negativo) → 400 VALIDATION', async () => {
+  const { db } = await createTestDb();
+  await createUserWithDefaultProfile({ db, email: 'a@b.it', password: 'pw-super-lunga-123', name: 'A' });
+  const app = makeApp(db);
+  const cookie = await login(app);
+  const res = await app.request('/api/profiles/active', {
+    method: 'PATCH',
+    headers: { cookie, 'content-type': 'application/json' },
+    body: JSON.stringify({ giorniIncasso: -5 }),
+  });
+  assert.equal(res.status, 400);
+  const body = await res.json();
+  assert.equal(body.error.code, 'VALIDATION');
 });

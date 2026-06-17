@@ -88,3 +88,11 @@
 .ys-msg.is-err { color: var(--color-error); }
 .ys-note { color: var(--text2); font-size: .88rem; }
 .ys-note-warn { color: var(--color-error); }
+
+/* ── Form profilo (personale / P.IVA) ───────────────────────────────── */
+.pf-h { font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; color: var(--text2); margin: 18px 0 10px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.pf-h:first-child { margin-top: 0; }
+.pf-field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 4px; }
+.pf-field > label { font-size: .78rem; color: var(--text2); }
+.pf-same { font-size: .74rem; color: var(--text3); font-weight: 500; text-transform: none; letter-spacing: 0; display: flex; align-items: center; gap: 6px; }
+.pf-err { font-size: .68rem; color: var(--color-error); min-height: .8em; }
