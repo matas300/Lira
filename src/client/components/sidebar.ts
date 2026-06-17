@@ -6,6 +6,7 @@ import { esc } from '../lib/dom';
 import { NAV_SECTIONS } from '../lib/nav';
 import { getYear, setYear } from '../lib/year';
 import { logout, switchProfile } from '../lib/auth';
+import { getTheme, toggleTheme, applyTheme } from '../lib/theme';
 import type { MeResponse } from '@shared/types';
 
 const COLLAPSED_KEY = 'lira_sidebar_collapsed';
@@ -50,13 +51,21 @@ export function renderSidebar(me: MeResponse, activeRoute: string, year: number)
         <nav class="sb-nav" role="navigation">${sections}</nav>
         <div class="sb-spacer"></div>
         <div class="sb-footer">
-          <a class="sb-profile" data-route="/profiles" href="/profiles" title="Gestisci profili">
-            <span class="sb-avatar" aria-hidden="true">${initial}</span>
-            <span class="sb-profile-name">${esc(me.activeProfile.displayName)}</span>
-          </a>
-          <select class="input sb-profile-select" data-profile-switch aria-label="Profilo attivo">${options}</select>
-          <div class="sb-footer-actions">
-            <button class="btn btn-ghost sb-logout" type="button" data-logout>Esci</button>
+          <div class="sb-profile-menu" data-profile-menu hidden role="menu">
+            ${me.profiles.length > 1 ? `<select class="input sb-profile-select" data-profile-switch aria-label="Profilo attivo">${options}</select>` : ''}
+            <a class="sb-menu-item" role="menuitem" data-route="/riepilogo" href="/riepilogo">Riepilogo <span class="sb-menu-tag">presto</span></a>
+            <a class="sb-menu-item" role="menuitem" data-route="/profilo-personale" href="/profilo-personale">Profilo personale <span class="sb-menu-tag">presto</span></a>
+            <a class="sb-menu-item" role="menuitem" data-route="/profilo-piva" href="/profilo-piva">Profilo P.IVA <span class="sb-menu-tag">presto</span></a>
+            <a class="sb-menu-item" role="menuitem" data-route="/impostazioni" href="/impostazioni">Impostazioni</a>
+            <button class="sb-menu-item" type="button" role="menuitem" data-theme-toggle>Tema <span class="sb-menu-val" data-theme-label>${getTheme() === 'light' ? 'chiaro' : 'scuro'}</span></button>
+            <div class="sb-menu-sep"></div>
+            <button class="sb-menu-item is-logout" type="button" role="menuitem" data-logout>Logout</button>
+          </div>
+          <div class="sb-footer-row">
+            <button class="sb-profile" type="button" data-profile-trigger aria-haspopup="menu" aria-expanded="false" title="Menu profilo">
+              <span class="sb-avatar" aria-hidden="true">${initial}</span>
+              <span class="sb-profile-name">${esc(me.activeProfile.displayName)}</span>
+            </button>
             <button class="sb-collapse-btn" type="button" data-sb-collapse aria-label="Comprimi/espandi barra laterale" title="Comprimi barra laterale">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
             </button>
@@ -80,6 +89,10 @@ export function wireSidebar(container: HTMLElement, opts: { onChanged: () => voi
   const logoutBtn = q<HTMLButtonElement>('[data-logout]');
   const prev = q<HTMLButtonElement>('[data-year-prev]');
   const next = q<HTMLButtonElement>('[data-year-next]');
+  const trigger = q<HTMLButtonElement>('[data-profile-trigger]');
+  const menu = q<HTMLElement>('[data-profile-menu]');
+  const themeToggle = q<HTMLButtonElement>('[data-theme-toggle]');
+  const themeLabel = q<HTMLElement>('[data-theme-label]');
 
   function onCollapse(): void {
     const collapsed = document.body.classList.toggle('sidebar-collapsed');
@@ -98,11 +111,33 @@ export function wireSidebar(container: HTMLElement, opts: { onChanged: () => voi
   function onPrev(): void { setYear(getYear() - 1); opts.onChanged(); }
   function onNext(): void { setYear(getYear() + 1); opts.onChanged(); }
 
+  function setMenuOpen(open: boolean): void {
+    if (!menu || !trigger) return;
+    menu.hidden = !open;
+    trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+  function onTrigger(e: MouseEvent): void { e.stopPropagation(); setMenuOpen(menu?.hidden ?? true); }
+  function onDocClick(e: MouseEvent): void {
+    if (!menu || menu.hidden) return;
+    const t = e.target as Node;
+    if (!menu.contains(t) && !trigger?.contains(t)) setMenuOpen(false);
+  }
+  function onKey(e: KeyboardEvent): void { if (e.key === 'Escape') setMenuOpen(false); }
+  function onTheme(): void {
+    toggleTheme();
+    applyTheme();
+    if (themeLabel) themeLabel.textContent = getTheme() === 'light' ? 'chiaro' : 'scuro';
+  }
+
   collapseBtn?.addEventListener('click', onCollapse);
   select?.addEventListener('change', onSwitch);
   logoutBtn?.addEventListener('click', onLogout);
   prev?.addEventListener('click', onPrev);
   next?.addEventListener('click', onNext);
+  trigger?.addEventListener('click', onTrigger);
+  document.addEventListener('click', onDocClick);
+  document.addEventListener('keydown', onKey);
+  themeToggle?.addEventListener('click', onTheme);
 
   return () => {
     collapseBtn?.removeEventListener('click', onCollapse);
@@ -110,5 +145,9 @@ export function wireSidebar(container: HTMLElement, opts: { onChanged: () => voi
     logoutBtn?.removeEventListener('click', onLogout);
     prev?.removeEventListener('click', onPrev);
     next?.removeEventListener('click', onNext);
+    trigger?.removeEventListener('click', onTrigger);
+    document.removeEventListener('click', onDocClick);
+    document.removeEventListener('keydown', onKey);
+    themeToggle?.removeEventListener('click', onTheme);
   };
 }
