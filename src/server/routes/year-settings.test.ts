@@ -193,6 +193,56 @@ test('PUT year-settings preserva budget_base_month esistente', async () => {
   assert.equal(row!.budgetBaseMonth, 5);
 });
 
+test('FIX: PUT non azzera overrides.confirmedWarnings impostati da PATCH warnings', async () => {
+  const { app, headers, db, profileId } = await makeApp();
+  const validBody = {
+    regime: 'forfettario',
+    coefficiente: 0.78,
+    impostaSostitutiva: 0.15,
+    inpsMode: 'gestione_separata',
+    inpsCategoria: null,
+  };
+
+  // 1) Crea la riga year_settings via PUT
+  let res = await app.request('/api/year-settings/2026', {
+    method: 'PUT',
+    headers: { ...headers, 'content-type': 'application/json' },
+    body: JSON.stringify(validBody),
+  });
+  assert.equal(res.status, 200);
+
+  // 2) Dismisses warning C1 via PATCH warnings
+  const patchRes = await app.request('/api/year-settings/2026/warnings', {
+    method: 'PATCH',
+    headers: { ...headers, 'content-type': 'application/json' },
+    body: JSON.stringify({ confirm: ['C1'] }),
+  });
+  assert.equal(patchRes.status, 200);
+  const patchBody = await patchRes.json();
+  assert.deepEqual(patchBody.confirmedWarnings, ['C1']);
+
+  // 3) PUT di nuovo (editor save, nessun overrides nel body)
+  res = await app.request('/api/year-settings/2026', {
+    method: 'PUT',
+    headers: { ...headers, 'content-type': 'application/json' },
+    body: JSON.stringify(validBody),
+  });
+  assert.equal(res.status, 200);
+
+  // 4) Verifica che overrides.confirmedWarnings contenga ancora 'C1'
+  const [row] = await db
+    .select()
+    .from(yearSettings)
+    .where(and(eq(yearSettings.profileId, profileId), eq(yearSettings.year, 2026)))
+    .limit(1);
+  assert.ok(row, 'row deve esistere');
+  const overrides = JSON.parse(row!.overrides ?? '{}') as { confirmedWarnings?: string[] };
+  assert.ok(
+    Array.isArray(overrides.confirmedWarnings) && overrides.confirmedWarnings.includes('C1'),
+    `confirmedWarnings deve contenere 'C1', trovato: ${JSON.stringify(overrides.confirmedWarnings)}`,
+  );
+});
+
 test('PATCH /:year/warnings: confirm/unconfirm aggiorna overrides.confirmedWarnings', async () => {
   const { app, headers, db, profileId } = await makeApp();
 
