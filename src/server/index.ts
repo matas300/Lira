@@ -14,6 +14,7 @@ import { fattureRoute } from './routes/fatture';
 import { scadenziarioRoute } from './routes/scadenziario';
 import { taxRoute } from './routes/tax';
 import { calendarioRoute } from './routes/calendario';
+import { budgetRoute } from './routes/budget';
 import { errorHandler } from './middleware/error';
 import type { AuthEnv } from './middleware/auth';
 
@@ -36,6 +37,7 @@ app.route('/api/fatture', fattureRoute);
 app.route('/api/scadenziario', scadenziarioRoute);
 app.route('/api/tax', taxRoute);
 app.route('/api/calendario', calendarioRoute);
+app.route('/api/budget', budgetRoute);
 
 // ── Static SPA (prod) ────────────────────────────────────────────────────────
 // In produzione il client buildato vive in ./dist/client (relativo alla cwd,
