@@ -76,3 +76,106 @@ export function renderPage(displayName: string, s: AnagraficaState): string {
     ${renderForm(displayName, s)}
   </div>`;
 }
+
+// ── mount ──
+
+interface ActiveProfileResponse {
+  profile: { displayName: string; anagrafica: Record<string, unknown> };
+}
+
+export function mount(container: HTMLElement): () => void {
+  return mountPage({
+    container,
+    route: '/profilo-personale',
+    render: async ({ main }) => {
+      main.innerHTML = `<div class="card ys-note">Carico il profilo…</div>`;
+
+      let displayName = '';
+      let state: AnagraficaState;
+      try {
+        const resp = await api.get<ActiveProfileResponse>('/api/profiles/active');
+        displayName = resp.profile.displayName;
+        state = anagraficaFromResponse(resp.profile.anagrafica);
+      } catch (err) {
+        const msg = err instanceof ApiError ? err.message : 'Impossibile caricare il profilo. Riprova.';
+        main.innerHTML = `<div class="card ys-note ys-note-warn">${esc(msg)}</div>`;
+        return;
+      }
+
+      function validateAll(): void {
+        const set = (field: string, msg: string | null) => {
+          const el = main.querySelector<HTMLElement>(`[data-err="${field}"]`);
+          if (el) el.textContent = msg ?? '';
+        };
+        set('cf', fieldError('cf', state.cf));
+        set('email', fieldError('email', state.email));
+        set('residenza.cap', fieldError('cap', state.residenza.cap));
+        set('residenza.provincia', fieldError('provincia', state.residenza.provincia));
+        set('domicilio_fiscale.cap', fieldError('cap', state.domicilio_fiscale.cap));
+        set('domicilio_fiscale.provincia', fieldError('provincia', state.domicilio_fiscale.provincia));
+        set('prov_nascita', fieldError('provincia', state.prov_nascita));
+      }
+
+      function render(): void {
+        main.innerHTML = renderPage(displayName, state);
+        const form = main.querySelector<HTMLFormElement>('[data-pf-form]')!;
+        const msgEl = main.querySelector<HTMLElement>('[data-pf-msg]')!;
+
+        // bind di tutti gli input text (top-level e annidati via "a.b")
+        main.querySelectorAll<HTMLInputElement>('input[data-field]').forEach((el) => {
+          const field = el.dataset['field']!;
+          el.addEventListener('input', () => {
+            if (field === 'displayName') { displayName = el.value; return; }
+            if (field.includes('.')) {
+              const [grp, key] = field.split('.') as ['residenza' | 'domicilio_fiscale', keyof AnagraficaState['residenza']];
+              state[grp][key] = el.value;
+            } else {
+              (state as unknown as Record<string, string>)[field] = el.value;
+            }
+            validateAll();
+          });
+        });
+
+        // "domicilio = residenza"
+        const same = main.querySelector<HTMLInputElement>('[data-same-domicilio]');
+        const wrap = main.querySelector<HTMLElement>('[data-domicilio-wrap]');
+        same?.addEventListener('change', () => {
+          if (same.checked) {
+            state = copyResidenzaToDomicilio(state);
+            if (wrap) wrap.style.display = 'none';
+            render();
+          } else if (wrap) {
+            wrap.style.display = '';
+          }
+        });
+
+        main.querySelector<HTMLButtonElement>('[data-pf-reset]')?.addEventListener('click', () => render());
+
+        form.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          msgEl.textContent = 'Salvataggio…';
+          msgEl.className = 'ys-msg';
+          try {
+            const resp = await api.patch<ActiveProfileResponse>('/api/profiles/active', {
+              displayName,
+              anagrafica: anagraficaToBody(state),
+            });
+            displayName = resp.profile.displayName;
+            state = anagraficaFromResponse(resp.profile.anagrafica);
+            render();
+            const m = main.querySelector<HTMLElement>('[data-pf-msg]');
+            if (m) { m.textContent = 'Salvato ✓'; m.className = 'ys-msg is-ok'; }
+          } catch (err) {
+            const text = err instanceof ApiError ? err.message : 'Errore durante il salvataggio.';
+            msgEl.textContent = text;
+            msgEl.className = 'ys-msg is-err';
+          }
+        });
+
+        validateAll();
+      }
+
+      render();
+    },
+  });
+}
