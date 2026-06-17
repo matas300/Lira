@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import { randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import { getCookie } from 'hono/cookie';
-import { ProfileCreateInput } from '@shared/schemas';
+import { ProfileCreateInput, ProfilePatchInput } from '@shared/schemas';
 import { profiles } from '../db/schema';
 import { requireSession, SESSION_COOKIE, type AuthEnv } from '../middleware/auth';
 import { HttpError } from '../middleware/error';
@@ -19,6 +19,8 @@ function toPublic(p: typeof profiles.$inferSelect) {
   return { id: p.id, slug: p.slug, displayName: p.displayName, giorniIncasso: p.giorniIncasso };
 }
 
+// Parsing difensivo dei blob JSON di profilo: ritorna {} (non null) su
+// null/malformato/non-oggetto, così i consumer hanno sempre un Record.
 function parseBlob(v: string | null): Record<string, unknown> {
   if (!v) return {};
   try {
@@ -48,6 +50,30 @@ profilesRoute.get('/active', async (c) => {
   const [row] = await db.select().from(profiles).where(eq(profiles.id, profileId)).limit(1);
   if (!row) throw new HttpError(404, 'PROFILE_NOT_FOUND', 'Profilo attivo non trovato');
   return c.json({ profile: toFull(row) });
+});
+
+profilesRoute.patch('/active', zJson(ProfilePatchInput), async (c) => {
+  const db = c.get('db');
+  const profileId = c.get('activeProfileId');
+  const patch = c.req.valid('json');
+
+  const [row] = await db.select().from(profiles).where(eq(profiles.id, profileId)).limit(1);
+  if (!row) throw new HttpError(404, 'PROFILE_NOT_FOUND', 'Profilo attivo non trovato');
+
+  const update: Partial<typeof profiles.$inferInsert> = { updatedAt: new Date().toISOString() };
+  if (patch.displayName !== undefined) update.displayName = patch.displayName;
+  if (patch.giorniIncasso !== undefined) update.giorniIncasso = patch.giorniIncasso;
+  // merge non distruttivo: parte dal blob esistente, sovrascrive solo le chiavi presenti.
+  if (patch.anagrafica !== undefined) {
+    update.anagrafica = JSON.stringify({ ...parseBlob(row.anagrafica), ...patch.anagrafica });
+  }
+  if (patch.attivita !== undefined) {
+    update.attivita = JSON.stringify({ ...parseBlob(row.attivita), ...patch.attivita });
+  }
+
+  await db.update(profiles).set(update).where(eq(profiles.id, profileId));
+  const [updated] = await db.select().from(profiles).where(eq(profiles.id, profileId)).limit(1);
+  return c.json({ profile: toFull(updated!) });
 });
 
 profilesRoute.post('/', zJson(ProfileCreateInput), async (c) => {
