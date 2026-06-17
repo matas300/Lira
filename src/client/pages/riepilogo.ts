@@ -185,9 +185,16 @@ export function mount(container: HTMLElement): () => void {
         scadHtml = renderScadenzeCard(prossimeScadenze(view.rows, 4), view.summary.totalResidual, today);
       } else {
         const err = scadRes.reason;
-        const msg = err instanceof ApiError ? err.message : 'Impossibile caricare le scadenze.';
-        scadHtml = `<div class="card riep-card"><h3>Prossime scadenze</h3>`
-          + `<p class="riep-note riep-note-warn">${esc(msg)}</p></div>`;
+        if (err instanceof ApiError && err.code === 'YEAR_SETTINGS_NOT_FOUND') {
+          // Anno non configurato: la card fiscale mostra già la CTA "Configura";
+          // qui basta una nota neutra, non un errore.
+          scadHtml = `<div class="card riep-card"><h3>Prossime scadenze</h3>`
+            + `<p class="riep-note">Configura l'anno per vedere le scadenze.</p></div>`;
+        } else {
+          const msg = err instanceof ApiError ? err.message : 'Impossibile caricare le scadenze.';
+          scadHtml = `<div class="card riep-card"><h3>Prossime scadenze</h3>`
+            + `<p class="riep-note riep-note-warn">${esc(msg)}</p></div>`;
+        }
       }
 
       main.innerHTML = renderPage(year, fiscalHtml + scadHtml + renderDichiarazioneCta());
