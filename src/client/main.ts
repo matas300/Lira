@@ -17,7 +17,7 @@ const routes: Record<string, () => Promise<PageModule>> = {
   '/budget': () => import('./pages/budget'),
   '/dichiarazione': () => import('./pages/placeholder'),
   '/impostazioni': () => import('./pages/impostazioni'),
-  '/riepilogo': () => import('./pages/placeholder'),
+  '/riepilogo': () => import('./pages/riepilogo'),
   '/profilo-personale': () => import('./pages/profilo-personale'),
   '/profilo-piva': () => import('./pages/profilo-piva'),
 };
