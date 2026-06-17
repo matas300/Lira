@@ -13,7 +13,7 @@ const routes: Record<string, () => Promise<PageModule>> = {
   // non ancora implementate → placeholder condiviso
   '/scadenze': () => import('./pages/scadenze'),
   '/calendario': () => import('./pages/calendario'),
-  '/budget': () => import('./pages/placeholder'),
+  '/budget': () => import('./pages/budget'),
   '/dichiarazione': () => import('./pages/placeholder'),
 };
 

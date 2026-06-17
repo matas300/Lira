@@ -182,6 +182,14 @@ yearSettingsRoute.put('/:year', zValidator('json', YearSettingsInput), async (c)
 
   await assertValidYearSettings(db, body, year, profileId);
 
+  // Leggi il valore corrente di budget_base_month prima del delete-insert,
+  // per non clobberare una colonna che appartiene alla route /budget.
+  const [existingRow] = await db
+    .select({ budgetBaseMonth: yearSettings.budgetBaseMonth })
+    .from(yearSettings)
+    .where(and(eq(yearSettings.profileId, profileId), eq(yearSettings.year, year)))
+    .limit(1);
+
   const insertValues: YearSettingsInsert = {
     profileId,
     year,
@@ -203,6 +211,7 @@ yearSettingsRoute.put('/:year', zValidator('json', YearSettingsInput), async (c)
     primoAnnoContribVariabiliPrec: body.primoAnnoContribVariabiliPrec ?? null,
     primoAnnoAccontiContribPrec: body.primoAnnoAccontiContribPrec ?? null,
     tariffaGiornaliera: body.tariffaGiornaliera ?? null,
+    budgetBaseMonth: existingRow?.budgetBaseMonth ?? null,
     overrides: body.overrides ? JSON.stringify(body.overrides) : null,
   };
 

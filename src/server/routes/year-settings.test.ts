@@ -155,6 +155,44 @@ test('PUT con tariffaGiornaliera: 250 → GET restituisce tariffaGiornaliera ===
   assert.equal(getBody.yearSettings.tariffaGiornaliera, 250);
 });
 
+test('PUT year-settings preserva budget_base_month esistente', async () => {
+  const { app, db, headers, profileId } = await makeApp();
+  const validBody = {
+    regime: 'forfettario',
+    coefficiente: 0.78,
+    impostaSostitutiva: 0.15,
+    inpsMode: 'gestione_separata',
+    inpsCategoria: null,
+    riduzione35: 0,
+    riduzione35Comunicata: 0,
+    riduzione35DataComunicazione: null,
+    haRedditoDipendente: 0,
+    limiteForfettario: 85000,
+    scadenziarioMetodo: 'storico',
+  };
+  // 1) crea la riga year_settings
+  let res = await app.request('/api/year-settings/2026', {
+    method: 'PUT',
+    headers: { ...headers, 'content-type': 'application/json' },
+    body: JSON.stringify(validBody),
+  });
+  assert.equal(res.status, 200);
+  // 2) imposta budget_base_month direttamente (simula il PUT budget)
+  await db.update(yearSettings)
+    .set({ budgetBaseMonth: 5 })
+    .where(and(eq(yearSettings.profileId, profileId), eq(yearSettings.year, 2026)));
+  // 3) ri-salva year-settings: NON deve azzerare budget_base_month
+  res = await app.request('/api/year-settings/2026', {
+    method: 'PUT',
+    headers: { ...headers, 'content-type': 'application/json' },
+    body: JSON.stringify(validBody),
+  });
+  assert.equal(res.status, 200);
+  const [row] = await db.select().from(yearSettings)
+    .where(and(eq(yearSettings.profileId, profileId), eq(yearSettings.year, 2026))).limit(1);
+  assert.equal(row!.budgetBaseMonth, 5);
+});
+
 test('PATCH /:year/warnings: confirm/unconfirm aggiorna overrides.confirmedWarnings', async () => {
   const { app, headers, db, profileId } = await makeApp();
 

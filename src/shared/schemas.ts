@@ -331,6 +331,22 @@ export const ActivityCodeEnum = z.enum(['8', 'M', 'F', 'FS', 'Malattia', 'Donazi
 export const CalendarEntryInput = z.object({ activityCode: ActivityCodeEnum });
 export type CalendarEntryInputT = z.infer<typeof CalendarEntryInput>;
 
+// ─────────────────────────── budget ───────────────────────────
+
+export const BudgetItemInput = z.object({
+  nome: z.string().trim().max(120),
+  importo: z.number().nonnegative(),
+  auto: z.boolean(),
+  ordine: z.number().int().min(0),
+});
+export type BudgetItemInputT = z.infer<typeof BudgetItemInput>;
+
+export const BudgetPutInput = z.object({
+  baseMonth: z.number().int().min(1).max(12).nullable(),
+  items: z.array(BudgetItemInput).max(100),
+});
+export type BudgetPutInputT = z.infer<typeof BudgetPutInput>;
+
 // ───── Import XML FatturaPA (Slice 5E) ─────
 
 export const ImportClienteSnapshot = z.object({

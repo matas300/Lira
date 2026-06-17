@@ -78,6 +78,9 @@ export const yearSettings = sqliteTable(
     riduzione35DataComunicazione: text('riduzione_35_data_comunicazione'),
     // Slice B: tariffa giornaliera per "crea fattura dal calendario" (per-anno).
     tariffaGiornaliera: real('tariffa_giornaliera'),
+    // Slice Budget: mese di riferimento per il netto mensile del budget
+    // (1..12). null = auto (ultima fattura) / media annuale.
+    budgetBaseMonth: integer('budget_base_month'),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.profileId, t.year] }),
