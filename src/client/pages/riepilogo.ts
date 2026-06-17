@@ -148,3 +148,49 @@ export function renderPage(year: number, body: string): string {
     <div class="riep-grid">${body}</div>
   </div>`;
 }
+
+// ── mount ──
+
+export function mount(container: HTMLElement): () => void {
+  return mountPage({
+    container,
+    route: '/riepilogo',
+    render: async ({ main }) => {
+      const year = getYear();
+      const today = new Date().toISOString().slice(0, 10);
+      main.innerHTML = `<div class="card riep-card"><p class="riep-note">Carico il riepilogo…</p></div>`;
+
+      const [scenarioRes, scadRes] = await Promise.allSettled([
+        api.get<ScenarioResponse>(`/api/tax/scenario?year=${year}`),
+        api.get<ScadenziarioView>(`/api/scadenziario/${year}`),
+      ]);
+
+      // ── card fiscali (sintesi + limite) da /api/tax/scenario ──
+      let fiscalHtml: string;
+      if (scenarioRes.status === 'fulfilled' && !scenarioRes.value.needsConfig && scenarioRes.value.comparison) {
+        const data = scenarioRes.value;
+        const selected = data.comparison!.selected;
+        const gross = data.grossCollected ?? selected.grossCollected;
+        const limite = data.limite ?? 85000;
+        const nettoAnnuo = data.nettoAnnuo ?? gross - selected.substituteTax - selected.deductibleContributionsPaid;
+        fiscalHtml = renderSintesiCard(selected, gross, nettoAnnuo) + renderLimitCard(gross, limite);
+      } else {
+        fiscalHtml = renderConfigPrompt(year);
+      }
+
+      // ── card scadenze da /api/scadenziario/:year ──
+      let scadHtml: string;
+      if (scadRes.status === 'fulfilled') {
+        const view = scadRes.value;
+        scadHtml = renderScadenzeCard(prossimeScadenze(view.rows, 4), view.summary.totalResidual, today);
+      } else {
+        const err = scadRes.reason;
+        const msg = err instanceof ApiError ? err.message : 'Impossibile caricare le scadenze.';
+        scadHtml = `<div class="card riep-card"><h3>Prossime scadenze</h3>`
+          + `<p class="riep-note riep-note-warn">${esc(msg)}</p></div>`;
+      }
+
+      main.innerHTML = renderPage(year, fiscalHtml + scadHtml + renderDichiarazioneCta());
+    },
+  });
+}
