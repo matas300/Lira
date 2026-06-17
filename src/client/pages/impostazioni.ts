@@ -173,6 +173,8 @@ export function mount(container: HTMLElement): () => void {
         }
       }
 
+      let savedState: YsFormState = { ...state };
+
       function render() {
         main.innerHTML = renderPage(state, isNew, year);
         const form = main.querySelector<HTMLFormElement>('[data-ys-form]')!;
@@ -206,7 +208,10 @@ export function mount(container: HTMLElement): () => void {
           bind(`[data-field="${k}"]`, (el) => { const v = (el as HTMLInputElement).value; return v === '' ? null : Number(v); }, k);
         }
 
-        main.querySelector<HTMLButtonElement>('[data-ys-reset]')?.addEventListener('click', () => { render(); });
+        main.querySelector<HTMLButtonElement>('[data-ys-reset]')?.addEventListener('click', () => {
+          state = { ...savedState };
+          render();
+        });
 
         form.addEventListener('submit', async (e) => {
           e.preventDefault();
@@ -215,6 +220,7 @@ export function mount(container: HTMLElement): () => void {
           try {
             const resp = await api.put<YearSettingsResponse>(`/api/year-settings/${year}`, bodyFromState(state));
             state = stateFromResponse(resp.yearSettings);
+            savedState = { ...state };
             isNew = false;
             render();
             const m = main.querySelector<HTMLElement>('[data-ys-msg]');
