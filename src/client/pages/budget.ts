@@ -139,3 +139,174 @@ export function renderNeedsConfig(year: number): string {
     <a class="btn btn-primary" href="/" data-route="/">Configura il ${esc(year)}</a>
   </div>`;
 }
+
+// ── compositore ──
+
+interface BudgetState {
+  baseMonth: number | null;
+  items: BudgetItemData[];
+}
+
+function renderBudget(state: BudgetState, months: MonthLordo[], rate: number, nettoAnnuo: number): string {
+  const netto = computeNettoMensile({ baseMonth: state.baseMonth, months, rate, nettoAnnuo });
+  const alloc = computeAllocation(state.items, netto.netto);
+  const rowsHtml = state.items.map((it, i) => renderVoceRow(i, it, alloc.rows[i]!, netto.netto)).join('');
+  return `<div class="budget-page">
+    <div class="budget-page-header"><h2>Budget ${esc(getYear())}</h2></div>
+    ${renderBaseSelector({ baseMonth: state.baseMonth, months, netto })}
+    ${renderNettoHeader(netto)}
+    <div class="budget-table">
+      <div class="budget-table-header"><span>Voce</span><span>Importo (€)</span><span>%</span><span>Auto</span><span></span></div>
+      ${rowsHtml}
+    </div>
+    <button class="btn-add" id="budgetAdd">+ Aggiungi voce</button>
+    ${renderTotali(alloc.totBudget, alloc.rimanente)}
+    ${renderDistribuzione(alloc.rows, netto.netto, alloc.rimanente)}
+  </div>`;
+}
+
+// ── mount ──
+
+interface BudgetResponse {
+  baseMonth: number | null;
+  items: Array<{ id: string; year: number; nome: string; importo: number; auto: boolean; ordine: number }>;
+}
+
+interface FatturaApi {
+  importo: number;
+  ritenuta?: number | null;
+  pagAnno?: number | null;
+  pagMese?: number | null;
+  stato?: string | null;
+  tipoDocumento?: string | null;
+}
+
+export function mount(container: HTMLElement): () => void {
+  let saveTimer: ReturnType<typeof setTimeout> | null = null;
+  let dirty = false;
+  let doSave: (() => void) | null = null;
+
+  return mountPage({
+    container,
+    route: '/budget',
+    onUnmount: () => {
+      if (saveTimer) clearTimeout(saveTimer);
+      if (dirty && doSave) doSave(); // flush finale
+    },
+    render: async ({ main }) => {
+      const year = getYear();
+      main.innerHTML = `<div class="card budget-note">Carico il budget…</div>`;
+
+      let budget: BudgetResponse;
+      let scenario: ScenarioResponse;
+      let fattureRaw: FatturaApi[];
+      try {
+        [budget, scenario, fattureRaw] = await Promise.all([
+          api.get<BudgetResponse>(`/api/budget/${year}`),
+          api.get<ScenarioResponse>(`/api/tax/scenario?year=${year}`),
+          api.get<FatturaApi[]>('/api/fatture'),
+        ]);
+      } catch (err) {
+        const msg = err instanceof ApiError ? err.message : 'Impossibile caricare il budget. Riprova.';
+        main.innerHTML = `<div class="card budget-note budget-note-warn">${esc(msg)}</div>`;
+        return;
+      }
+
+      if (scenario.needsConfig || !scenario.comparison) {
+        main.innerHTML = renderNeedsConfig(scenario.year ?? year);
+        return;
+      }
+
+      const selected = scenario.comparison.selected;
+      const gross = scenario.grossCollected ?? selected.grossCollected;
+      const rate = gross > 0 ? (selected.substituteTax + selected.deductibleContributionsPaid) / gross : 0;
+      const nettoAnnuo = scenario.nettoAnnuo ?? (gross - selected.substituteTax - selected.deductibleContributionsPaid);
+      const months = monthsWithFatture(fattureRaw, year);
+
+      const state: BudgetState = {
+        baseMonth: budget.baseMonth,
+        items: budget.items.map((it) => ({ nome: it.nome, importo: it.importo, auto: it.auto, ordine: it.ordine })),
+      };
+
+      function save() {
+        dirty = false;
+        const payload = {
+          baseMonth: state.baseMonth,
+          items: state.items.map((it, i) => ({ nome: it.nome, importo: it.importo, auto: it.auto, ordine: i })),
+        };
+        void api.put(`/api/budget/${year}`, payload).catch((err) => {
+          const msg = err instanceof ApiError ? err.message : 'Errore durante il salvataggio.';
+          const errEl = document.createElement('div');
+          errEl.className = 'budget-error-toast';
+          errEl.textContent = msg;
+          main.insertBefore(errEl, main.firstChild);
+          setTimeout(() => errEl.remove(), 4000);
+        });
+      }
+      doSave = save;
+
+      function scheduleSave() {
+        dirty = true;
+        if (saveTimer) clearTimeout(saveTimer);
+        saveTimer = setTimeout(() => { saveTimer = null; save(); }, 500);
+      }
+
+      function render() {
+        main.innerHTML = renderBudget(state, months, rate, nettoAnnuo);
+
+        const netto = computeNettoMensile({ baseMonth: state.baseMonth, months, rate, nettoAnnuo }).netto;
+
+        const baseSel = main.querySelector<HTMLSelectElement>('#budgetBaseMonth');
+        baseSel?.addEventListener('change', () => {
+          const v = baseSel.value;
+          state.baseMonth = v === '' ? null : Number(v);
+          scheduleSave();
+          render();
+        });
+
+        main.querySelector<HTMLButtonElement>('#budgetAdd')?.addEventListener('click', () => {
+          state.items.push({ nome: '', importo: 0, auto: false, ordine: state.items.length });
+          scheduleSave();
+          render();
+        });
+
+        main.querySelectorAll<HTMLElement>('.budget-row').forEach((rowEl) => {
+          const idx = Number(rowEl.dataset['idx']);
+          const it = state.items[idx];
+          if (!it) return;
+
+          rowEl.querySelector<HTMLInputElement>('[data-field="nome"]')?.addEventListener('change', (e) => {
+            it.nome = (e.target as HTMLInputElement).value;
+            scheduleSave();
+          });
+          rowEl.querySelector<HTMLInputElement>('[data-field="importo"]')?.addEventListener('change', (e) => {
+            it.importo = parseFloat((e.target as HTMLInputElement).value) || 0;
+            it.auto = false;
+            scheduleSave();
+            render();
+          });
+          rowEl.querySelector<HTMLInputElement>('[data-field="pct"]')?.addEventListener('change', (e) => {
+            const pct = parseFloat((e.target as HTMLInputElement).value) || 0;
+            it.importo = ceil2(netto * pct / 100);
+            it.auto = false;
+            scheduleSave();
+            render();
+          });
+          rowEl.querySelector<HTMLInputElement>('[data-field="auto"]')?.addEventListener('change', (e) => {
+            it.auto = (e.target as HTMLInputElement).checked;
+            if (it.auto) it.importo = 0;
+            scheduleSave();
+            render();
+          });
+          rowEl.querySelector<HTMLButtonElement>('[data-field="del"]')?.addEventListener('click', () => {
+            state.items.splice(idx, 1);
+            scheduleSave();
+            render();
+          });
+        });
+      }
+
+      render();
+    },
+  });
+}
