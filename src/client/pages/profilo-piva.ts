@@ -115,15 +115,12 @@ export function mount(container: HTMLElement): () => void {
 
         main.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-field]').forEach((el) => {
           const field = el.dataset['field']!;
+          // 'input' copre sia gli <input> sia il <select> (che lo emette nei
+          // browser moderni alla selezione), come nella pagina Profilo personale.
           el.addEventListener('input', () => {
             if (field === 'giorniIncasso') { giorni = Number((el as HTMLInputElement).value) || 0; return; }
             (state as unknown as Record<string, string>)[field] = el.value;
             validateAll();
-          });
-          // i <select> emettono 'change', non 'input' in alcuni browser: copri entrambi
-          el.addEventListener('change', () => {
-            if (field === 'giorniIncasso') { giorni = Number((el as HTMLInputElement).value) || 0; return; }
-            (state as unknown as Record<string, string>)[field] = el.value;
           });
         });
 
