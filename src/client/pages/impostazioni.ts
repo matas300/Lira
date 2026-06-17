@@ -144,3 +144,90 @@ export function renderPage(s: YsFormState, isNew: boolean, year: number): string
     ${renderForm(s)}
   </div>`;
 }
+
+// ── mount ──
+
+interface YearSettingsResponse { yearSettings: Record<string, unknown> }
+
+export function mount(container: HTMLElement): () => void {
+  return mountPage({
+    container,
+    route: '/impostazioni',
+    render: async ({ main }) => {
+      const year = getYear();
+      main.innerHTML = `<div class="card ys-note">Carico le impostazioni…</div>`;
+
+      let state: YsFormState;
+      let isNew = false;
+      try {
+        const resp = await api.get<YearSettingsResponse>(`/api/year-settings/${year}`);
+        state = stateFromResponse(resp.yearSettings);
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 404) {
+          state = defaults();
+          isNew = true;
+        } else {
+          const msg = err instanceof ApiError ? err.message : 'Impossibile caricare le impostazioni. Riprova.';
+          main.innerHTML = `<div class="card ys-note ys-note-warn">${esc(msg)}</div>`;
+          return;
+        }
+      }
+
+      function render() {
+        main.innerHTML = renderPage(state, isNew, year);
+        const form = main.querySelector<HTMLFormElement>('[data-ys-form]')!;
+        const msgEl = main.querySelector<HTMLElement>('[data-ys-msg]')!;
+
+        function bind<K extends keyof YsFormState>(sel: string, read: (el: HTMLInputElement | HTMLSelectElement) => YsFormState[K], key: K, rerender = false): void {
+          const el = main.querySelector<HTMLInputElement | HTMLSelectElement>(sel);
+          el?.addEventListener('change', () => {
+            (state as unknown as Record<string, unknown>)[key as string] = read(el);
+            if (rerender) render();
+          });
+        }
+
+        main.querySelectorAll<HTMLButtonElement>('[data-sost]').forEach((b) => {
+          b.addEventListener('click', () => { state.impostaSostitutiva = Number(b.dataset['sost']); render(); });
+        });
+
+        bind('[data-field="coefficiente"]', (el) => Number((el as HTMLSelectElement).value), 'coefficiente');
+        bind('[data-field="inpsMode"]', (el) => (el as HTMLSelectElement).value as YsFormState['inpsMode'], 'inpsMode', true);
+        bind('[data-field="inpsCategoria"]', (el) => (el as HTMLSelectElement).value as YsFormState['inpsCategoria'], 'inpsCategoria');
+        bind('[data-field="limiteForfettario"]', (el) => Number((el as HTMLInputElement).value) || 0, 'limiteForfettario');
+        bind('[data-field="tariffaGiornaliera"]', (el) => { const v = (el as HTMLInputElement).value; return v === '' ? null : Number(v); }, 'tariffaGiornaliera');
+        bind('[data-field="scadenziarioMetodo"]', (el) => (el as HTMLSelectElement).value as YsFormState['scadenziarioMetodo'], 'scadenziarioMetodo');
+        bind('[data-field="prorogaSaldoAt"]', (el) => { const v = (el as HTMLInputElement).value; return v === '' ? null : v; }, 'prorogaSaldoAt');
+        bind('[data-field="riduzione35"]', (el) => (el as HTMLInputElement).checked, 'riduzione35', true);
+        bind('[data-field="riduzione35Comunicata"]', (el) => (el as HTMLInputElement).checked, 'riduzione35Comunicata');
+        bind('[data-field="riduzione35DataComunicazione"]', (el) => { const v = (el as HTMLInputElement).value; return v === '' ? null : v; }, 'riduzione35DataComunicazione');
+        bind('[data-field="haRedditoDipendente"]', (el) => (el as HTMLInputElement).checked, 'haRedditoDipendente');
+
+        for (const k of ['primoAnnoFatturatoPrec','primoAnnoImpostaPrec','primoAnnoAccontiImpostaPrec','primoAnnoContribVariabiliPrec','primoAnnoAccontiContribPrec'] as const) {
+          bind(`[data-field="${k}"]`, (el) => { const v = (el as HTMLInputElement).value; return v === '' ? null : Number(v); }, k);
+        }
+
+        main.querySelector<HTMLButtonElement>('[data-ys-reset]')?.addEventListener('click', () => { render(); });
+
+        form.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          msgEl.textContent = 'Salvataggio…';
+          msgEl.className = 'ys-msg';
+          try {
+            const resp = await api.put<YearSettingsResponse>(`/api/year-settings/${year}`, bodyFromState(state));
+            state = stateFromResponse(resp.yearSettings);
+            isNew = false;
+            render();
+            const m = main.querySelector<HTMLElement>('[data-ys-msg]');
+            if (m) { m.textContent = 'Salvato ✓'; m.className = 'ys-msg is-ok'; }
+          } catch (err) {
+            const text = err instanceof ApiError ? err.message : 'Errore durante il salvataggio.';
+            msgEl.textContent = text;
+            msgEl.className = 'ys-msg is-err';
+          }
+        });
+      }
+
+      render();
+    },
+  });
+}
