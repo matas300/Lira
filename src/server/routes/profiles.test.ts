@@ -8,6 +8,8 @@ import { profilesRoute } from './profiles';
 import { authRoute } from './auth';
 import { errorHandler } from '../middleware/error';
 import type { AuthEnv } from '../middleware/auth';
+import { profiles } from '../db/schema';
+import { eq } from 'drizzle-orm';
 
 function makeApp(db: import('../db/client').Db) {
   const app = new Hono<AuthEnv>();
@@ -116,4 +118,42 @@ test('POST /api/profiles/:slug/activate con slug inesistente → 404', async () 
   const cookie = await login(app);
   const res = await app.request('/api/profiles/ghost/activate', { method: 'POST', headers: { cookie } });
   assert.equal(res.status, 404);
+});
+
+test('GET /api/profiles/active ritorna il profilo attivo con blob parsati', async () => {
+  const { db } = await createTestDb();
+  await createUserWithDefaultProfile({ db, email: 'a@b.it', password: 'pw-super-lunga-123', name: 'A' });
+  const app = makeApp(db);
+  const cookie = await login(app);
+
+  // semina blob JSON sul profilo default
+  const [p] = await db.select().from(profiles).limit(1);
+  await db.update(profiles).set({
+    anagrafica: JSON.stringify({ nome: 'Mario', residenza: { citta: 'Roma' } }),
+    attivita: JSON.stringify({ partita_iva: '00743110157', regime_default: 'forfettario' }),
+  }).where(eq(profiles.id, p!.id));
+
+  const res = await app.request('/api/profiles/active', { headers: { cookie } });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.profile.slug, 'default');
+  assert.equal(body.profile.anagrafica.nome, 'Mario');
+  assert.equal(body.profile.anagrafica.residenza.citta, 'Roma');
+  assert.equal(body.profile.attivita.partita_iva, '00743110157');
+  assert.equal(body.profile.attivita.regime_default, 'forfettario');
+});
+
+test('GET /api/profiles/active con blob null/malformato → oggetti vuoti', async () => {
+  const { db } = await createTestDb();
+  await createUserWithDefaultProfile({ db, email: 'a@b.it', password: 'pw-super-lunga-123', name: 'A' });
+  const app = makeApp(db);
+  const cookie = await login(app);
+  const [p] = await db.select().from(profiles).limit(1);
+  await db.update(profiles).set({ anagrafica: 'not-json{', attivita: null }).where(eq(profiles.id, p!.id));
+
+  const res = await app.request('/api/profiles/active', { headers: { cookie } });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.deepEqual(body.profile.anagrafica, {});
+  assert.deepEqual(body.profile.attivita, {});
 });

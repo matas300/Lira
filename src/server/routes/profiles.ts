@@ -19,10 +19,35 @@ function toPublic(p: typeof profiles.$inferSelect) {
   return { id: p.id, slug: p.slug, displayName: p.displayName, giorniIncasso: p.giorniIncasso };
 }
 
+function parseBlob(v: string | null): Record<string, unknown> {
+  if (!v) return {};
+  try {
+    const o = JSON.parse(v);
+    return o && typeof o === 'object' && !Array.isArray(o) ? (o as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function toFull(p: typeof profiles.$inferSelect) {
+  return {
+    id: p.id, slug: p.slug, displayName: p.displayName, giorniIncasso: p.giorniIncasso,
+    anagrafica: parseBlob(p.anagrafica), attivita: parseBlob(p.attivita),
+  };
+}
+
 profilesRoute.get('/', async (c) => {
   const db = c.get('db');
   const list = await listProfilesForUser(db, c.get('userId'));
   return c.json({ profiles: list.map(toPublic) });
+});
+
+profilesRoute.get('/active', async (c) => {
+  const db = c.get('db');
+  const profileId = c.get('activeProfileId');
+  const [row] = await db.select().from(profiles).where(eq(profiles.id, profileId)).limit(1);
+  if (!row) throw new HttpError(404, 'PROFILE_NOT_FOUND', 'Profilo attivo non trovato');
+  return c.json({ profile: toFull(row) });
 });
 
 profilesRoute.post('/', zJson(ProfileCreateInput), async (c) => {
