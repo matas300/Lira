@@ -105,11 +105,13 @@ test('buildWarnings: regime non forfettario → error', () => {
   assert.ok(w.some((x) => x.code === 'REGIME_NON_FORFETTARIO' && x.severity === 'error'));
 });
 
-test('buildWarnings: reddito lordo oltre 85k → warn; oltre 100k → warn aggiuntivo', () => {
-  const w85 = buildWarnings(input({ scenario: fakeScenario({ forfettarioGrossIncome: 90000 }) }));
+test('buildWarnings: ricavi oltre 85k → warn; oltre 100k → warn aggiuntivo (mutuo esclusivo)', () => {
+  const w85 = buildWarnings(input({ scenario: fakeScenario({ grossCollected: 90000 }) }));
   assert.ok(w85.some((x) => x.code === 'SOGLIA_85K'));
-  const w100 = buildWarnings(input({ scenario: fakeScenario({ forfettarioGrossIncome: 101000 }) }));
+  assert.ok(!w85.some((x) => x.code === 'SOGLIA_100K'));
+  const w100 = buildWarnings(input({ scenario: fakeScenario({ grossCollected: 101000 }) }));
   assert.ok(w100.some((x) => x.code === 'SOGLIA_100K'));
+  assert.ok(!w100.some((x) => x.code === 'SOGLIA_85K')); // else-if: non entrambi
 });
 
 test('buildWarnings: startup 5% oltre 5 anni → warn', () => {

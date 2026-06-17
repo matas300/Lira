@@ -162,12 +162,15 @@ export function buildWarnings(inp: DichiarazioneInput): DichiarazioneWarning[] {
   if (!a.cf || !(a.nome && a.cognome) || !a.data_nascita) {
     w.push({ code: 'FRONTESPIZIO_INCOMPLETO', severity: 'error', message: 'Anagrafica incompleta (codice fiscale, nome/cognome, data di nascita): completala nel Profilo personale.' });
   }
-  const redditoLordo = inp.scenario.forfettarioGrossIncome;
+  // Soglia forfettario: misurata sui RICAVI/compensi percepiti (art. 1 c. 54
+  // L. 197/2022), NON sul reddito coefficiente-ridotto. Coerente con regime.ts.
+  const ricavi = inp.scenario.grossCollected;
   const limite = inp.ys.limiteForfettario || 85000;
-  if (redditoLordo > limite + 15000) {
-    w.push({ code: 'SOGLIA_100K', severity: 'warn', message: `Reddito lordo oltre ${limite + 15000} €: decadenza immediata dal forfettario nell'anno corrente (L. 197/2022).` });
-  } else if (redditoLordo > limite) {
-    w.push({ code: 'SOGLIA_85K', severity: 'warn', message: `Reddito lordo oltre ${limite} €: decadenza dal forfettario dall'anno successivo.` });
+  const limite100 = limite + 15000;
+  if (ricavi > limite100) {
+    w.push({ code: 'SOGLIA_100K', severity: 'warn', message: `Ricavi oltre ${limite100} €: decadenza immediata dal forfettario nell'anno corrente (L. 197/2022).` });
+  } else if (ricavi > limite) {
+    w.push({ code: 'SOGLIA_85K', severity: 'warn', message: `Ricavi oltre ${limite} €: decadenza dal forfettario dall'anno successivo.` });
   }
   if (inp.ys.impostaSostitutiva === 0.05) {
     const annoInizio = yearOf(inp.dataInizioAttivita);
