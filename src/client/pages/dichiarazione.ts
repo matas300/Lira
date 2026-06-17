@@ -83,3 +83,27 @@ export function renderPage(d: Dichiarazione): string {
     </div>
   </div>`;
 }
+
+// ── mount ──
+
+export function mount(container: HTMLElement): () => void {
+  return mountPage({
+    container,
+    route: '/dichiarazione',
+    render: async ({ main }) => {
+      const year = getYear();
+      main.innerHTML = `<div class="card dich-card"><p class="dich-note">Carico la dichiarazione…</p></div>`;
+      try {
+        const data = await api.get<DichiarazioneResponse>(`/api/dichiarazione/${year}`);
+        if (data.needsConfig || !data.dichiarazione) {
+          main.innerHTML = renderConfigPrompt(data.year ?? year);
+          return;
+        }
+        main.innerHTML = renderPage(data.dichiarazione);
+      } catch (err) {
+        const msg = err instanceof ApiError ? err.message : 'Impossibile caricare la dichiarazione. Riprova.';
+        main.innerHTML = `<div class="card dich-card"><h2>Dichiarazione</h2><p class="dich-note dich-warn-error">${esc(msg)}</p></div>`;
+      }
+    },
+  });
+}
