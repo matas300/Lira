@@ -152,3 +152,26 @@ test('ImportFatturaInput — tipoDocumento invalido → throw', () => {
     marcaDaBollo: false, clienteSnapshot: { nome: 'X', tipoCliente: 'PG', nazione: 'IT' },
   }));
 });
+
+// ───── Budget (Slice Budget) ─────
+import { BudgetItemInput, BudgetPutInput } from './schemas';
+
+test('BudgetPutInput accetta baseMonth null e items validi', () => {
+  const r = BudgetPutInput.safeParse({
+    baseMonth: null,
+    items: [{ nome: 'Affitto', importo: 500, auto: false, ordine: 0 }],
+  });
+  assert.equal(r.success, true);
+});
+
+test('BudgetPutInput rifiuta baseMonth fuori range', () => {
+  assert.equal(BudgetPutInput.safeParse({ baseMonth: 13, items: [] }).success, false);
+  assert.equal(BudgetPutInput.safeParse({ baseMonth: 0, items: [] }).success, false);
+});
+
+test('BudgetItemInput rifiuta importo negativo', () => {
+  assert.equal(
+    BudgetItemInput.safeParse({ nome: 'X', importo: -1, auto: false, ordine: 0 }).success,
+    false,
+  );
+});
