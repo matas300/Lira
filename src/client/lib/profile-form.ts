@@ -78,7 +78,7 @@ export function fieldError(kind: FieldKind, value: string): string | null {
   if (v === '') return null;
   switch (kind) {
     case 'partita_iva': return isValidPartitaIvaIT(v.replace(/\s+/g, '')) ? null : 'P.IVA non valida (11 cifre).';
-    case 'cf': return isValidCodiceFiscaleFormat(v) ? null : 'Codice fiscale non valido.';
+    case 'cf': return isValidCodiceFiscaleFormat(v.toUpperCase()) ? null : 'Codice fiscale non valido.';
     case 'cap': return /^\d{5}$/.test(v) ? null : 'CAP non valido (5 cifre).';
     case 'provincia': return /^[A-Za-z]{2}$/.test(v) ? null : 'Provincia: 2 lettere.';
     case 'email': return isValidPec(v) ? null : 'Email non valida.';

@@ -58,4 +58,16 @@ test('fieldError: vuoto = nessun errore; formato sbagliato = messaggio', () => {
   assert.equal(fieldError('provincia', 'ROMA'), 'Provincia: 2 lettere.');
   assert.equal(fieldError('email', 'nope'), 'Email non valida.');
   assert.equal(fieldError('email', 'a@b.it'), null);
+  assert.equal(fieldError('cf', 'rssmra80a01h501u'), null); // CF minuscolo valido accettato
+});
+
+test('anagraficaToBody / copyResidenzaToDomicilio: nessun aliasing dei sotto-oggetti', () => {
+  const st = anagraficaDefaults();
+  const b = anagraficaToBody(st) as { residenza: { citta: string } };
+  b.residenza.citta = 'Mutato';
+  assert.equal(st.residenza.citta, ''); // lo stato originale NON cambia
+
+  const copied = copyResidenzaToDomicilio(st);
+  copied.domicilio_fiscale.cap = '99999';
+  assert.equal(st.residenza.cap, ''); // residenza originale NON tocca
 });
