@@ -44,7 +44,15 @@ export const NAV_SECTIONS: NavSection[] = [
 
 export const ALL_ROUTES: string[] = NAV_SECTIONS.flatMap((s) => s.items.map((i) => i.route));
 
+/** Etichette per route raggiungibili fuori dalla nav principale (menu profilo). */
+const EXTRA_LABELS: Record<string, string> = {
+  '/impostazioni': 'Impostazioni',
+  '/riepilogo': 'Riepilogo',
+  '/profilo-personale': 'Profilo personale',
+  '/profilo-piva': 'Profilo P.IVA',
+};
+
 export function labelForRoute(route: string): string {
   for (const s of NAV_SECTIONS) for (const i of s.items) if (i.route === route) return i.label;
-  return '';
+  return EXTRA_LABELS[route] ?? '';
 }

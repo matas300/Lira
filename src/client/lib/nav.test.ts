@@ -31,3 +31,10 @@ test('labelForRoute: route sconosciuta → stringa vuota', () => {
 test('ALL_ROUTES contiene tutte le 8 route', () => {
   assert.equal(ALL_ROUTES.length, 8);
 });
+
+test('labelForRoute: route fuori-nav del menu profilo hanno etichetta', () => {
+  assert.equal(labelForRoute('/impostazioni'), 'Impostazioni');
+  assert.equal(labelForRoute('/riepilogo'), 'Riepilogo');
+  assert.equal(labelForRoute('/profilo-personale'), 'Profilo personale');
+  assert.equal(labelForRoute('/profilo-piva'), 'Profilo P.IVA');
+});
