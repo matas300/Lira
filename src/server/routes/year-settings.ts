@@ -185,7 +185,7 @@ yearSettingsRoute.put('/:year', zValidator('json', YearSettingsInput), async (c)
   // Leggi il valore corrente di budget_base_month prima del delete-insert,
   // per non clobberare una colonna che appartiene alla route /budget.
   const [existingRow] = await db
-    .select({ budgetBaseMonth: yearSettings.budgetBaseMonth })
+    .select({ budgetBaseMonth: yearSettings.budgetBaseMonth, overrides: yearSettings.overrides })
     .from(yearSettings)
     .where(and(eq(yearSettings.profileId, profileId), eq(yearSettings.year, year)))
     .limit(1);
@@ -212,7 +212,7 @@ yearSettingsRoute.put('/:year', zValidator('json', YearSettingsInput), async (c)
     primoAnnoAccontiContribPrec: body.primoAnnoAccontiContribPrec ?? null,
     tariffaGiornaliera: body.tariffaGiornaliera ?? null,
     budgetBaseMonth: existingRow?.budgetBaseMonth ?? null,
-    overrides: body.overrides ? JSON.stringify(body.overrides) : null,
+    overrides: body.overrides ? JSON.stringify(body.overrides) : (existingRow?.overrides ?? null),
   };
 
   // SQLite/libSQL non ha UPSERT nativo nel dialect Drizzle che usiamo:

@@ -29,5 +29,5 @@ test('renderTotali: rimanente negativo marcato negative', () => {
 test('renderNeedsConfig: CTA verso configurazione anno', () => {
   const html = renderNeedsConfig(2026);
   assert.match(html, /2026/);
-  assert.match(html, /data-route="\/"/);
+  assert.match(html, /data-route="\/impostazioni"/);
 });

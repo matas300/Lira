@@ -48,3 +48,43 @@
 .budget-note { color: var(--text2); font-size: .88rem; }
 .budget-note-warn { color: var(--color-error, #e05555); }
 .budget-error-toast { background: var(--color-error, #e05555); color: #fff; padding: 8px 12px; border-radius: 8px; margin-bottom: 10px; font-size: .85rem; }
+
+/* ── Menu profilo (sidebar footer) ───────────────────────────────────── */
+.sb-footer-row { display: flex; align-items: center; gap: 8px; }
+.sb-profile { flex: 1; display: flex; align-items: center; gap: 10px; background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: 8px; padding: 7px 9px; cursor: pointer; color: var(--text); text-align: left; }
+.sb-avatar { width: 30px; height: 30px; border-radius: 50%; background: linear-gradient(135deg, var(--color-tertiary), var(--color-primary)); display: flex; align-items: center; justify-content: center; font-weight: 700; color: #fff; flex-shrink: 0; }
+.sb-profile-name { font-weight: 700; font-size: .9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-profile-menu { background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: 12px; box-shadow: var(--shadow-modal); padding: 8px; margin-bottom: 8px; }
+.sb-profile-menu[hidden] { display: none; }
+.sb-profile-menu .sb-profile-select { width: 100%; margin-bottom: 6px; }
+.sb-menu-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding: 9px 12px; border-radius: 8px; color: var(--text); font-weight: 600; font-size: .88rem; background: none; border: none; cursor: pointer; text-align: left; }
+.sb-menu-item:hover { background: var(--color-surface-3); }
+.sb-menu-tag { font-size: .6rem; border: 1px solid var(--text3); border-radius: 999px; padding: 1px 6px; color: var(--text3); font-weight: 500; }
+.sb-menu-val { font-size: .78rem; color: var(--text2); font-weight: 500; }
+.sb-menu-sep { height: 1px; background: var(--color-border); margin: 6px 4px; }
+.sb-menu-item.is-logout { color: var(--color-tertiary); }
+
+/* ── Pagina Impostazioni ─────────────────────────────────────────────── */
+.ys-crumb { font-size: .74rem; color: var(--text3); margin-bottom: 6px; }
+.ys-banner { background: rgba(93,170,138,.10); border: 1px solid var(--color-primary); color: var(--text); font-size: .82rem; padding: 8px 12px; border-radius: 8px; margin-bottom: 16px; }
+.ys-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 22px; }
+.ys-field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 4px; }
+.ys-field > label { font-size: .78rem; color: var(--text2); }
+.ys-hint { font-size: .68rem; color: var(--text3); }
+.ys-toggle, .ys-seg { display: flex; border: 1px solid var(--color-border); border-radius: 8px; overflow: hidden; width: max-content; }
+.ys-toggle-btn, .ys-seg-btn { background: var(--color-bg); border: none; color: var(--text2); padding: 8px 16px; font-size: .85rem; cursor: pointer; }
+.ys-toggle-btn.is-active { background: var(--color-primary); color: #10110d; font-weight: 700; }
+.ys-toggle-btn.is-disabled { color: var(--text3); opacity: .5; cursor: not-allowed; }
+.ys-seg-btn.is-active { background: var(--color-surface-3); color: var(--text); font-weight: 600; }
+.ys-checks { margin-top: 14px; display: flex; flex-direction: column; gap: 4px; }
+.ys-check { display: flex; align-items: center; gap: 9px; font-size: .86rem; }
+.ys-check input { width: 16px; height: 16px; accent-color: var(--color-primary); }
+.ys-sub { margin: 6px 0 6px 26px; padding-left: 14px; border-left: 2px solid var(--color-border); display: flex; flex-direction: column; gap: 8px; }
+.ys-advanced { margin-top: 18px; border-top: 1px solid var(--color-border); padding-top: 12px; }
+.ys-advanced > summary { color: var(--text2); font-size: .84rem; font-weight: 600; cursor: pointer; margin-bottom: 12px; }
+.ys-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 20px; }
+.ys-msg { margin-right: auto; font-size: .82rem; color: var(--text2); }
+.ys-msg.is-ok { color: var(--green); }
+.ys-msg.is-err { color: var(--color-error); }
+.ys-note { color: var(--text2); font-size: .88rem; }
+.ys-note-warn { color: var(--color-error); }

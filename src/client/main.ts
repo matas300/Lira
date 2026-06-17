@@ -1,5 +1,6 @@
 // src/client/main.ts
 import { getMe } from './lib/auth';
+import { applyTheme } from './lib/theme';
 
 type PageModule = { mount: (container: HTMLElement) => () => void };
 
@@ -15,6 +16,10 @@ const routes: Record<string, () => Promise<PageModule>> = {
   '/calendario': () => import('./pages/calendario'),
   '/budget': () => import('./pages/budget'),
   '/dichiarazione': () => import('./pages/placeholder'),
+  '/impostazioni': () => import('./pages/impostazioni'),
+  '/riepilogo': () => import('./pages/placeholder'),
+  '/profilo-personale': () => import('./pages/placeholder'),
+  '/profilo-piva': () => import('./pages/placeholder'),
 };
 
 const PUBLIC_ROUTES = new Set(['/login']);
@@ -56,4 +61,5 @@ document.addEventListener('click', (e) => {
 
 window.addEventListener('popstate', () => navigate(location.pathname, false));
 
+applyTheme();
 navigate(location.pathname, false);
