@@ -21,6 +21,7 @@ function eur(n: number): string {
 }
 function sourceBadge(source: Rigo['source']): string {
   if (source === 'from-profile') return '<span class="dich-src">da profilo</span>';
+  if (source === 'override') return '<span class="dich-src dich-src-ovr">rettifica</span>';
   if (source === 'zero') return '<span class="dich-src">—</span>';
   return '';
 }
@@ -93,6 +94,31 @@ export function renderF24(moduli: F24Modulo[]): string {
   </div>`;
 }
 
+function lmVal(d: Dichiarazione, key: string): number {
+  return d.quadroLM.find((r) => r.key === key)?.value
+    ?? d.quadroRX.find((r) => r.key === key)?.value ?? 0;
+}
+
+export function renderRettifiche(d: Dichiarazione): string {
+  const acc = lmVal(d, 'LM43');
+  const cred = lmVal(d, 'LM39');
+  const rx1 = lmVal(d, 'RX1');
+  return `<div class="card dich-card dich-adj">
+    <h3>Rettifiche manuali</h3>
+    <p class="dich-note">Imposta i valori solo se differiscono dal calcolo automatico. Lascia vuoto/azzera per usare il valore calcolato.</p>
+    <div class="dich-adj-grid">
+      <label>Acconti versati (LM43)<input type="number" step="0.01" min="0" id="adj-acconti" value="${esc(acc)}"></label>
+      <label>Crediti d'imposta (LM39)<input type="number" step="0.01" min="0" id="adj-crediti" value="${esc(cred)}"></label>
+      <label>Credito anno precedente (RX1)<input type="number" step="0.01" min="0" id="adj-credprec" value="${esc(rx1)}"></label>
+    </div>
+    <div class="dich-adj-actions">
+      <button class="btn btn-primary" type="button" id="adj-save">Salva rettifiche</button>
+      <button class="btn" type="button" id="adj-reset">Ripristina calcolato</button>
+      <span class="dich-note" id="adj-msg"></span>
+    </div>
+  </div>`;
+}
+
 export function renderConfigPrompt(year: number): string {
   return `<div class="card dich-card">
     <h2>Dichiarazione ${esc(year)}</h2>
@@ -112,6 +138,7 @@ export function renderPage(d: Dichiarazione): string {
     ${renderQuadro('Quadro RX — Compensazioni', d.quadroRX)}
     ${renderQuadro('Quadro RS — Dati informativi', d.quadroRS)}
     ${renderF24(d.f24)}
+    ${renderRettifiche(d)}
   </div>`;
 }
 
@@ -123,6 +150,28 @@ export function mount(container: HTMLElement): () => void {
     route: '/dichiarazione',
     render: async ({ main }) => {
       const year = getYear();
+      const paint = (d: Dichiarazione): void => {
+        main.innerHTML = renderPage(d);
+        const num = (id: string): number | null => {
+          const el = main.querySelector<HTMLInputElement>(id);
+          const v = el && el.value.trim() !== '' ? Number(el.value) : null;
+          return v != null && Number.isFinite(v) && v >= 0 ? v : null;
+        };
+        const msg = main.querySelector<HTMLElement>('#adj-msg');
+        const save = main.querySelector<HTMLButtonElement>('#adj-save');
+        const reset = main.querySelector<HTMLButtonElement>('#adj-reset');
+        const patch = async (bodyObj: Record<string, number | null>): Promise<void> => {
+          if (msg) msg.textContent = 'Salvataggio…';
+          try {
+            const resp = await api.patch<DichiarazioneResponse>(`/api/dichiarazione/${year}`, bodyObj);
+            if (resp.dichiarazione) paint(resp.dichiarazione);
+          } catch (err) {
+            if (msg) msg.textContent = err instanceof ApiError ? err.message : 'Errore nel salvataggio.';
+          }
+        };
+        save?.addEventListener('click', () => void patch({ accontiVersati: num('#adj-acconti'), creditiImposta: num('#adj-crediti'), creditoAnnoPrec: num('#adj-credprec') }));
+        reset?.addEventListener('click', () => void patch({ accontiVersati: null, creditiImposta: null, creditoAnnoPrec: null }));
+      };
       main.innerHTML = `<div class="card dich-card"><p class="dich-note">Carico la dichiarazione…</p></div>`;
       try {
         const data = await api.get<DichiarazioneResponse>(`/api/dichiarazione/${year}`);
@@ -130,7 +179,7 @@ export function mount(container: HTMLElement): () => void {
           main.innerHTML = renderConfigPrompt(data.year ?? year);
           return;
         }
-        main.innerHTML = renderPage(data.dichiarazione);
+        paint(data.dichiarazione);
       } catch (err) {
         const msg = err instanceof ApiError ? err.message : 'Impossibile caricare la dichiarazione. Riprova.';
         main.innerHTML = `<div class="card dich-card"><h2>Dichiarazione</h2><p class="dich-note dich-warn-error">${esc(msg)}</p></div>`;
