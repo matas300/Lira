@@ -380,3 +380,15 @@ test('buildDichiarazione: nessun override → niente warning DICH_OVERRIDE_ATTIV
   assert.equal(d.quadroLM.find((r) => r.key === 'LM45')!.value, 1415);
   assert.ok(!d.warnings.some((w) => w.code === 'DICH_OVERRIDE_ATTIVO'));
 });
+
+test('GOLDEN 6C: override completo coerente su LM/RX/F24', () => {
+  const s = fakeScenario(); // imposta 2415, taxSaldo 1415
+  const d = buildDichiarazione(input({ overrides: { accontiVersati: 900, creditiImposta: 100, creditoAnnoPrec: 200 } }));
+  // saldo = 2415 − 900 − 100 − 200 = 1215
+  assert.equal(d.quadroLM.find((r) => r.key === 'LM45')!.value, 1215);
+  assert.equal(d.quadroLM.find((r) => r.key === 'LM39')!.value, 100);
+  assert.equal(d.quadroLM.find((r) => r.key === 'LM43')!.value, 900);
+  assert.equal(d.quadroRX.find((r) => r.key === 'RX1')!.value, 200);
+  assert.equal(d.quadroRX.find((r) => r.key === 'RX4')!.value, 0);
+  assert.equal(d.f24[0]!.righe.find((r) => r.codice === '1792')!.importo, 1215);
+});
