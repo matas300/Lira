@@ -31,8 +31,10 @@ function fakeScenario(over: Partial<ForfettarioScenario> = {}): ForfettarioScena
   };
 }
 
+const appliedDefault = (over = {}) => applyDichiarazioneOverrides(fakeScenario(over), {});
+
 test('buildQuadroLM: mappa i righi chiave dallo scenario', () => {
-  const righi = buildQuadroLM(fakeScenario());
+  const righi = buildQuadroLM(fakeScenario(), applyDichiarazioneOverrides(fakeScenario(), {}));
   const by = (k: string) => righi.find((r) => r.key === k)!;
   assert.equal(by('LM1').value, 30000);    // ricavi
   assert.equal(by('LM2').value, 20100);    // reddito lordo
@@ -46,7 +48,8 @@ test('buildQuadroLM: mappa i righi chiave dallo scenario', () => {
 });
 
 test('buildQuadroLM: acconti (LM43) mai negativi', () => {
-  const righi = buildQuadroLM(fakeScenario({ substituteTax: 500, taxSaldo: 500 }));
+  const s = fakeScenario({ substituteTax: 500, taxSaldo: 500 });
+  const righi = buildQuadroLM(s, applyDichiarazioneOverrides(s, {}));
   assert.equal(righi.find((r) => r.key === 'LM43')!.value, 0);
 });
 
@@ -67,13 +70,48 @@ test('buildQuadroRR: artigiani/commercianti → fissi + variabili + totale', () 
 });
 
 test('buildQuadroRX: credito anno prec a 0 (6A), source zero', () => {
-  const righi = buildQuadroRX();
+  const righi = buildQuadroRX(applyDichiarazioneOverrides(fakeScenario(), {}));
   assert.equal(righi.find((r) => r.key === 'RX1')!.value, 0);
   assert.equal(righi.find((r) => r.key === 'RX1')!.source, 'zero');
 });
 
 test('buildQuadroRS: vuoto in 6A (informativo, popolato in 6C)', () => {
   assert.deepEqual(buildQuadroRS(), []);
+});
+
+test('buildQuadroLM: include LM39 e usa saldoEffettivo per LM45', () => {
+  const s = fakeScenario();
+  const a = applyDichiarazioneOverrides(s, { creditiImposta: 200, accontiVersati: 800 });
+  const righi = buildQuadroLM(s, a);
+  const by = (k: string) => righi.find((r) => r.key === k)!;
+  assert.equal(by('LM36').value, 2415);
+  assert.equal(by('LM39').value, 200);
+  assert.equal(by('LM39').source, 'override');
+  assert.equal(by('LM43').value, 800);
+  assert.equal(by('LM43').source, 'override');
+  assert.equal(by('LM45').value, 1415); // 2415 − 200 − 800
+});
+
+test('buildQuadroLM: default → LM39 zero, LM43 computed (non override)', () => {
+  const s = fakeScenario();
+  const righi = buildQuadroLM(s, applyDichiarazioneOverrides(s, {}));
+  const by = (k: string) => righi.find((r) => r.key === k)!;
+  assert.equal(by('LM39').value, 0);
+  assert.equal(by('LM39').source, 'zero');
+  assert.equal(by('LM43').source, 'computed');
+  assert.equal(by('LM45').value, 1415);
+});
+
+test('buildQuadroRX: RX1 da override, RX4 = credito da riportare', () => {
+  const s = fakeScenario();
+  const a = applyDichiarazioneOverrides(s, { creditoAnnoPrec: 2000 });
+  const righi = buildQuadroRX(a);
+  const by = (k: string) => righi.find((r) => r.key === k)!;
+  assert.equal(by('RX1').value, 2000);
+  assert.equal(by('RX1').source, 'override');
+  // detrazioni = 1000(acc) + 2000 = 3000 > 2415 → RX4 = 585
+  assert.equal(by('RX4').value, 585);
+  assert.equal(by('RX4').source, 'computed');
 });
 
 const ysBase: DichiarazioneYsView = {

@@ -142,19 +142,19 @@ export function applyDichiarazioneOverrides(
   };
 }
 
-/** Quadro LM (forfettario): mappa reddito e imposta sostitutiva dallo scenario. */
-export function buildQuadroLM(s: ForfettarioScenario): Rigo[] {
+/** Quadro LM (forfettario): reddito + imposta + rettifiche 6C (LM39/LM43/LM45). */
+export function buildQuadroLM(s: ForfettarioScenario, a: DichiarazioneOverridesApplied): Rigo[] {
   const lm4 = Math.max(0, s.forfettarioGrossIncome - s.deductibleContributionsPaid);
-  const accontiImputati = Math.max(0, s.substituteTax - s.taxSaldo);
   return [
     rigo('LM1', 'Ricavi/compensi percepiti', s.grossCollected),
     rigo('LM2', 'Reddito forfettario lordo (ricavi × coefficiente)', s.forfettarioGrossIncome),
     rigo('LM3', 'Contributi previdenziali deducibili (cassa)', s.deductibleContributionsPaid),
     rigo('LM4', 'Reddito al netto dei contributi', lm4),
     rigo('LM34', 'Reddito imponibile', s.taxableBase),
-    rigo('LM36', 'Imposta sostitutiva', s.substituteTax),
-    rigo('LM43', 'Acconti versati', accontiImputati),
-    rigo('LM45', 'Imposta sostitutiva a debito (saldo)', s.taxSaldo),
+    rigo('LM36', 'Imposta sostitutiva', a.imposta),
+    rigo('LM39', 'Crediti d\'imposta', a.creditiImposta, a.overridden.creditiImposta ? 'override' : 'zero'),
+    rigo('LM43', 'Acconti versati', a.accontiVersati, a.overridden.accontiVersati ? 'override' : 'computed'),
+    rigo('LM45', 'Imposta sostitutiva a debito (saldo)', a.saldoEffettivo),
   ];
 }
 
@@ -181,11 +181,11 @@ export function buildQuadroRR(s: ForfettarioScenario, inpsMode: string): QuadroR
   };
 }
 
-/** Quadro RX (compensazioni): in 6A nessun credito da anno precedente (→ 6C). */
-export function buildQuadroRX(): Rigo[] {
+/** Quadro RX (compensazioni): RX1 credito anno precedente (6C), RX4 credito da riportare. */
+export function buildQuadroRX(a: DichiarazioneOverridesApplied): Rigo[] {
   return [
-    rigo('RX1', 'Credito da anno precedente', 0, 'zero'),
-    rigo('RX4', 'Credito da riportare al periodo successivo', 0, 'zero'),
+    rigo('RX1', 'Credito da anno precedente', a.creditoAnnoPrec, a.overridden.creditoAnnoPrec ? 'override' : 'zero'),
+    rigo('RX4', 'Credito da riportare al periodo successivo', a.creditoDaRiportare, a.creditoDaRiportare > 0 ? 'computed' : 'zero'),
   ];
 }
 
