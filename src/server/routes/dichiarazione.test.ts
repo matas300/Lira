@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Hono } from 'hono';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { createTestDb } from '../db/test-helper';
 import { createUserWithDefaultProfile } from '../lib/users';
 import { createSession } from '../lib/session';
@@ -106,7 +106,7 @@ async function makePatchApp() {
     regime: 'forfettario', coefficiente: 0.67, impostaSostitutiva: 0.15,
     inpsMode: 'artigiani_commercianti', inpsCategoria: 'artigiano',
   }) });
-  return { app, headers };
+  return { app, headers, db, profileId };
 }
 
 test('PATCH /api/dichiarazione/:year salva override e li riflette nel GET', async () => {
@@ -140,4 +140,50 @@ test('PATCH con valore negativo → 422', async () => {
   const { app, headers } = await makePatchApp();
   const res = await app.request('/api/dichiarazione/2025', { method: 'PATCH', headers, body: JSON.stringify({ creditiImposta: -5 }) });
   assert.equal(res.status, 400); // zValidator → 400
+});
+
+test('PATCH dichiarazione preserva i sibling overrides (merge non-distruttivo 6C)', async () => {
+  const { app, headers } = await makePatchApp();
+
+  // 1) seed di un sibling override nella stessa colonna JSON: confirmedWarnings.
+  const warn = await app.request('/api/year-settings/2025/warnings', {
+    method: 'PATCH', headers, body: JSON.stringify({ confirm: ['X1'] }),
+  });
+  assert.equal(warn.status, 200);
+
+  // 2) PATCH dichiarazione: scrive overrides.dichiarazione.creditoAnnoPrec.
+  const patch = await app.request('/api/dichiarazione/2025', {
+    method: 'PATCH', headers, body: JSON.stringify({ creditoAnnoPrec: 100 }),
+  });
+  assert.equal(patch.status, 200);
+
+  // 3) entrambe le chiavi sopravvivono nella colonna overrides.
+  const get = await app.request('/api/year-settings/2025', { headers });
+  assert.equal(get.status, 200);
+  const body = await get.json() as {
+    yearSettings: { overrides: { confirmedWarnings?: string[]; dichiarazione?: { creditoAnnoPrec?: number } } | null };
+  };
+  const overrides = body.yearSettings.overrides;
+  assert.ok(overrides, 'overrides deve essere presente');
+  assert.deepEqual(overrides.confirmedWarnings, ['X1']); // sibling intatto
+  assert.equal(overrides.dichiarazione?.creditoAnnoPrec, 100); // nuovo override applicato
+});
+
+test('PATCH dichiarazione con overrides JSON corrotto → 200 (parse difensivo, no 500)', async () => {
+  const { app, headers, db, profileId } = await makePatchApp();
+
+  // Sporca la colonna overrides con JSON non valido.
+  await db.update(yearSettings).set({ overrides: '{not valid json' })
+    .where(and(eq(yearSettings.profileId, profileId), eq(yearSettings.year, 2025)));
+
+  const patch = await app.request('/api/dichiarazione/2025', {
+    method: 'PATCH', headers, body: JSON.stringify({ creditoAnnoPrec: 100 }),
+  });
+  assert.equal(patch.status, 200);
+
+  // L'override è stato ricostruito da capo e applicato.
+  const get = await app.request('/api/dichiarazione/2025', { headers });
+  const body = await get.json();
+  const rx1 = body.dichiarazione.quadroRX.find((r: { key: string }) => r.key === 'RX1');
+  assert.equal(rx1.value, 100);
 });
