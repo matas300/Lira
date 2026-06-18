@@ -137,3 +137,8 @@
 .dich-warn-warn { color: var(--color-warning); border-color: var(--color-warning); background: rgba(220,170,80,.08); }
 .dich-warn-info { color: var(--text2); border-color: var(--color-border); }
 .dich-cta { flex-direction: row; align-items: center; justify-content: space-between; gap: 16px; }
+.dich-f24 { display: flex; flex-direction: column; gap: 12px; }
+.dich-f24-sez { margin-top: 8px; }
+.dich-f24-sez h4 { margin: 0 0 4px; font-size: .78rem; color: var(--text2); text-transform: uppercase; letter-spacing: .04em; }
+.dich-f24-tot { margin-top: 6px; border-top: 2px solid var(--color-border); font-weight: 700; }
+.dich-f24-tot .dich-row-k { color: var(--text); font-weight: 700; }

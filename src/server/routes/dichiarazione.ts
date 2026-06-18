@@ -67,9 +67,11 @@ dichiarazioneRoute.get('/:year', async (c) => {
   const ys: DichiarazioneYsView = {
     regime: ysRow.regime,
     inpsMode: ysRow.inpsMode,
+    inpsCategoria: ysRow.inpsCategoria ?? null,
     impostaSostitutiva: Number(ysRow.impostaSostitutiva),
     coefficiente: Number(ysRow.coefficiente),
     limiteForfettario: Number(ysRow.limiteForfettario ?? 85000),
+    prorogaSaldoAt: ysRow.prorogaSaldoAt ?? null,
   };
 
   const dichiarazione = buildDichiarazione({

@@ -12,6 +12,8 @@
 // acconti sono già year-aware nello scenario.
 
 import type { ForfettarioScenario } from './tax-engine';
+import { buildAccontoPlan, buildContributiAccontoPlan } from './tax-engine';
+import { buildRolledDueDate } from '@shared/date-rules';
 
 export type RigoSource = 'computed' | 'from-profile' | 'zero';
 export interface Rigo {
@@ -40,12 +42,28 @@ export interface QuadroRR {
   sezione: 'gestione_separata' | 'artigiani_commercianti';
   righi: Rigo[];
 }
+export type F24Sezione = 'erario' | 'inps';
+export interface F24Riga {
+  sezione: F24Sezione;
+  codice: string; // '1792' | '1790' | '1791' | 'AP' | 'CP' | 'P10'
+  descrizione: string;
+  annoRiferimento: number;
+  importo: number; // sempre > 0 (le righe a 0 sono omesse)
+}
+export interface F24Modulo {
+  scadenza: string;          // ISO, post proroga/rolling
+  scadenzaOriginale: string; // ISO canonica (30/06 o 30/11 di N+1)
+  prorogaApplied: boolean;
+  righe: F24Riga[];
+  totale: number;
+}
 export interface Dichiarazione {
   frontespizio: Frontespizio;
   quadroLM: Rigo[];
   quadroRR: QuadroRR;
   quadroRX: Rigo[];
   quadroRS: Rigo[];
+  f24: F24Modulo[];
   warnings: DichiarazioneWarning[];
 }
 
@@ -56,9 +74,11 @@ export interface DichiarazioneAnagrafica {
 export interface DichiarazioneYsView {
   regime: string;
   inpsMode: string;
+  inpsCategoria: string | null;
   impostaSostitutiva: number;
   coefficiente: number;
   limiteForfettario: number;
+  prorogaSaldoAt: string | null;
 }
 export interface DichiarazioneInput {
   year: number;
@@ -182,14 +202,98 @@ export function buildWarnings(inp: DichiarazioneInput): DichiarazioneWarning[] {
   return w;
 }
 
+/** Causale contributo INPS per la sezione INPS dell'F24 (contributi variabili). */
+export function inpsCausale(inpsMode: string, inpsCategoria: string | null): string {
+  if (inpsMode === 'gestione_separata') return 'P10';
+  return inpsCategoria === 'commerciante' ? 'CP' : 'AP';
+}
+
+const F24_ERARIO = { saldo: '1792', acc1: '1790', acc2: '1791' } as const;
+
+function f24Riga(sezione: F24Sezione, codice: string, descrizione: string, annoRiferimento: number, importo: number): F24Riga {
+  return { sezione, codice, descrizione, annoRiferimento, importo: r2(importo) };
+}
+
+interface ResolvedDue { scadenza: string; prorogaApplied: boolean; }
+function resolveGiugno(year: number, prorogaSaldoAt: string | null): ResolvedDue {
+  if (prorogaSaldoAt) return { scadenza: prorogaSaldoAt, prorogaApplied: true };
+  return { scadenza: buildRolledDueDate(`${year + 1}-06-30`).date, prorogaApplied: false };
+}
+
+/**
+ * Moduli F24 da dichiarazione (anno d'imposta N → versamenti N+1):
+ * 30/06/N+1 = saldo sostitutiva (anno N) + acconto 1 (anno N+1) + saldo/acconto1 INPS;
+ * 30/11/N+1 = acconto 2 (anno N+1) + acconto 2 INPS.
+ * Acconti N+1 RICALCOLATI sulla base imposta(N)/contributi(N). Righe a 0 omesse;
+ * moduli senza righe non emessi.
+ */
+export function buildF24(s: ForfettarioScenario, ys: DichiarazioneYsView, year: number): F24Modulo[] {
+  if (ys.regime !== 'forfettario') return [];
+
+  const taxAcc = buildAccontoPlan(s.substituteTax);
+  const gestione = ys.inpsMode === 'gestione_separata' ? 'gestione_separata' : 'artigiani_commercianti';
+  const inpsAcc = buildContributiAccontoPlan(s.contributiVariabiliDovuti, gestione);
+  const causale = inpsCausale(ys.inpsMode, ys.inpsCategoria);
+
+  const giugnoBase = `${year + 1}-06-30`;
+  const novembreBase = `${year + 1}-11-30`;
+  const giugno = resolveGiugno(year, ys.prorogaSaldoAt);
+  const novembre = buildRolledDueDate(novembreBase);
+
+  const righeGiugno = [
+    f24Riga('erario', F24_ERARIO.saldo, 'Imposta sostitutiva — saldo', year, s.taxSaldo),
+    f24Riga('erario', F24_ERARIO.acc1, 'Imposta sostitutiva — acconto 1ª rata', year + 1, taxAcc.first),
+    f24Riga('inps', causale, 'Contributi INPS variabili — saldo', year, s.contributionSaldo),
+    f24Riga('inps', causale, 'Contributi INPS variabili — acconto 1ª rata', year + 1, inpsAcc.first),
+  ].filter((r) => r.importo > 0);
+
+  const righeNovembre = [
+    f24Riga('erario', F24_ERARIO.acc2, 'Imposta sostitutiva — acconto 2ª rata', year + 1, taxAcc.second),
+    f24Riga('inps', causale, 'Contributi INPS variabili — acconto 2ª rata', year + 1, inpsAcc.second),
+  ].filter((r) => r.importo > 0);
+
+  const moduli: F24Modulo[] = [];
+  if (righeGiugno.length) {
+    moduli.push({
+      scadenza: giugno.scadenza, scadenzaOriginale: giugnoBase, prorogaApplied: giugno.prorogaApplied,
+      righe: righeGiugno, totale: r2(righeGiugno.reduce((a, r) => a + r.importo, 0)),
+    });
+  }
+  if (righeNovembre.length) {
+    moduli.push({
+      scadenza: novembre.date, scadenzaOriginale: novembreBase, prorogaApplied: false,
+      righe: righeNovembre, totale: r2(righeNovembre.reduce((a, r) => a + r.importo, 0)),
+    });
+  }
+  return moduli;
+}
+
+/** Warning specifici dell'F24 (info, non bloccanti). */
+export function buildF24Warnings(
+  f24: F24Modulo[], s: ForfettarioScenario, ys: DichiarazioneYsView,
+): DichiarazioneWarning[] {
+  const w: DichiarazioneWarning[] = [];
+  if (ys.regime !== 'forfettario') return w;
+  const taxAcc = buildAccontoPlan(s.substituteTax);
+  if (s.substituteTax > 0 && taxAcc.total === 0) {
+    w.push({ code: 'F24_ACCONTI_SOTTO_SOGLIA', severity: 'info', message: 'Imposta sostitutiva sotto la soglia di 51,65 €: nessun acconto dovuto per l\'anno successivo.' });
+  }
+  if (f24.length > 0) {
+    w.push({ code: 'F24_INPS_SEDE_MANCANTE', severity: 'info', message: 'Prospetto di calcolo: sede e matricola INPS non sono incluse, quindi l\'F24 non è pronto per la trasmissione.' });
+  }
+  return w;
+}
+
 /** Assembla la dichiarazione completa dai dati dell'anno. */
 export function buildDichiarazione(inp: DichiarazioneInput): Dichiarazione {
+  const f24 = buildF24(inp.scenario, inp.ys, inp.year);
   return {
     frontespizio: buildFrontespizio(inp),
     quadroLM: buildQuadroLM(inp.scenario),
     quadroRR: buildQuadroRR(inp.scenario, inp.ys.inpsMode),
     quadroRX: buildQuadroRX(),
     quadroRS: buildQuadroRS(),
-    warnings: buildWarnings(inp),
+    f24,
+    warnings: [...buildWarnings(inp), ...buildF24Warnings(f24, inp.scenario, inp.ys)],
   };
 }
