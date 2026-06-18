@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildQuadroLM, buildQuadroRR, buildQuadroRX, buildQuadroRS } from './dichiarazione-engine';
 import { buildFrontespizio, buildWarnings, buildDichiarazione } from './dichiarazione-engine';
+import { inpsCausale } from './dichiarazione-engine';
 import type { DichiarazioneInput, DichiarazioneYsView } from './dichiarazione-engine';
 import type { ForfettarioScenario } from './tax-engine';
 
@@ -130,4 +131,11 @@ test('buildDichiarazione: assembla tutti i quadri', () => {
   assert.equal(d.quadroRX.length, 2);
   assert.equal(d.frontespizio.regime, 'RF19');
   assert.ok(Array.isArray(d.warnings));
+});
+
+test('inpsCausale: artigiani/commercianti/gestione separata', () => {
+  assert.equal(inpsCausale('gestione_separata', null), 'P10');
+  assert.equal(inpsCausale('artigiani_commercianti', 'commerciante'), 'CP');
+  assert.equal(inpsCausale('artigiani_commercianti', 'artigiano'), 'AP');
+  assert.equal(inpsCausale('artigiani_commercianti', null), 'AP'); // default artigiano
 });

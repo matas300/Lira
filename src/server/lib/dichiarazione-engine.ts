@@ -40,12 +40,28 @@ export interface QuadroRR {
   sezione: 'gestione_separata' | 'artigiani_commercianti';
   righi: Rigo[];
 }
+export type F24Sezione = 'erario' | 'inps';
+export interface F24Riga {
+  sezione: F24Sezione;
+  codice: string; // '1792' | '1790' | '1791' | 'AP' | 'CP' | 'P10'
+  descrizione: string;
+  annoRiferimento: number;
+  importo: number; // sempre > 0 (le righe a 0 sono omesse)
+}
+export interface F24Modulo {
+  scadenza: string;          // ISO, post proroga/rolling
+  scadenzaOriginale: string; // ISO canonica (30/06 o 30/11 di N+1)
+  prorogaApplied: boolean;
+  righe: F24Riga[];
+  totale: number;
+}
 export interface Dichiarazione {
   frontespizio: Frontespizio;
   quadroLM: Rigo[];
   quadroRR: QuadroRR;
   quadroRX: Rigo[];
   quadroRS: Rigo[];
+  f24: F24Modulo[];
   warnings: DichiarazioneWarning[];
 }
 
@@ -180,6 +196,12 @@ export function buildWarnings(inp: DichiarazioneInput): DichiarazioneWarning[] {
   }
   w.push({ code: 'RS_INFORMATIVO', severity: 'info', message: 'Quadro RS: i dati sono solo informativi e NON deducono dal reddito forfettario.' });
   return w;
+}
+
+/** Causale contributo INPS per la sezione INPS dell'F24 (contributi variabili). */
+export function inpsCausale(inpsMode: string, inpsCategoria: string | null): string {
+  if (inpsMode === 'gestione_separata') return 'P10';
+  return inpsCategoria === 'commerciante' ? 'CP' : 'AP';
 }
 
 /** Assembla la dichiarazione completa dai dati dell'anno. */
