@@ -107,9 +107,9 @@ export function renderRettifiche(d: Dichiarazione): string {
     <h3>Rettifiche manuali</h3>
     <p class="dich-note">Imposta i valori solo se differiscono dal calcolo automatico. Lascia vuoto/azzera per usare il valore calcolato.</p>
     <div class="dich-adj-grid">
-      <label>Acconti versati (LM43)<input type="number" step="0.01" min="0" id="adj-acconti" value="${esc(acc)}"></label>
-      <label>Crediti d'imposta (LM39)<input type="number" step="0.01" min="0" id="adj-crediti" value="${esc(cred)}"></label>
-      <label>Credito anno precedente (RX1)<input type="number" step="0.01" min="0" id="adj-credprec" value="${esc(rx1)}"></label>
+      <label>Acconti versati (LM43)<input type="number" step="0.01" min="0" id="adj-acconti" value="${esc(acc)}" data-default="${esc(acc)}"></label>
+      <label>Crediti d'imposta (LM39)<input type="number" step="0.01" min="0" id="adj-crediti" value="${esc(cred)}" data-default="${esc(cred)}"></label>
+      <label>Credito anno precedente (RX1)<input type="number" step="0.01" min="0" id="adj-credprec" value="${esc(rx1)}" data-default="${esc(rx1)}"></label>
     </div>
     <div class="dich-adj-actions">
       <button class="btn btn-primary" type="button" id="adj-save">Salva rettifiche</button>
@@ -157,6 +157,15 @@ export function mount(container: HTMLElement): () => void {
           const v = el && el.value.trim() !== '' ? Number(el.value) : null;
           return v != null && Number.isFinite(v) && v >= 0 ? v : null;
         };
+        const knob = (id: string): number | null => {
+          const el = main.querySelector<HTMLInputElement>(id);
+          const v = num(id);
+          if (v == null) return null;
+          const def = Number(el?.dataset.default ?? 'NaN');
+          // valore uguale al default calcolato → lascia il computo automatico (no override)
+          if (Number.isFinite(def) && Math.round(v * 100) === Math.round(def * 100)) return null;
+          return v;
+        };
         const msg = main.querySelector<HTMLElement>('#adj-msg');
         const save = main.querySelector<HTMLButtonElement>('#adj-save');
         const reset = main.querySelector<HTMLButtonElement>('#adj-reset');
@@ -169,7 +178,7 @@ export function mount(container: HTMLElement): () => void {
             if (msg) msg.textContent = err instanceof ApiError ? err.message : 'Errore nel salvataggio.';
           }
         };
-        save?.addEventListener('click', () => void patch({ accontiVersati: num('#adj-acconti'), creditiImposta: num('#adj-crediti'), creditoAnnoPrec: num('#adj-credprec') }));
+        save?.addEventListener('click', () => void patch({ accontiVersati: knob('#adj-acconti'), creditiImposta: knob('#adj-crediti'), creditoAnnoPrec: knob('#adj-credprec') }));
         reset?.addEventListener('click', () => void patch({ accontiVersati: null, creditiImposta: null, creditoAnnoPrec: null }));
       };
       main.innerHTML = `<div class="card dich-card"><p class="dich-note">Carico la dichiarazione…</p></div>`;
