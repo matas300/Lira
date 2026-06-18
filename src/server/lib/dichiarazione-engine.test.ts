@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { buildQuadroLM, buildQuadroRR, buildQuadroRX, buildQuadroRS } from './dichiarazione-engine';
 import { buildFrontespizio, buildWarnings, buildDichiarazione } from './dichiarazione-engine';
 import { inpsCausale, buildF24, buildF24Warnings } from './dichiarazione-engine';
+import { applyDichiarazioneOverrides } from './dichiarazione-engine';
 import type { DichiarazioneInput, DichiarazioneYsView } from './dichiarazione-engine';
 import type { ForfettarioScenario } from './tax-engine';
 
@@ -263,4 +264,40 @@ test('GOLDEN F24: commerciante usa CP, importi bloccati', () => {
     ['1791', 2026, 1500], ['CP', 2026, 400],
   ]);
   assert.equal(mods[1]!.totale, 1900);
+});
+
+test('applyDichiarazioneOverrides: default → invariante 6A (saldoEffettivo === taxSaldo)', () => {
+  const s = fakeScenario(); // substituteTax 2415, taxSaldo 1415
+  const a = applyDichiarazioneOverrides(s, {});
+  assert.equal(a.imposta, 2415);
+  assert.equal(a.accontiVersati, 1000);     // 2415 − 1415 (acconti imputati)
+  assert.equal(a.creditiImposta, 0);
+  assert.equal(a.creditoAnnoPrec, 0);
+  assert.equal(a.saldoEffettivo, 1415);     // === taxSaldo
+  assert.equal(a.creditoDaRiportare, 0);
+  assert.deepEqual(a.overridden, { accontiVersati: false, creditiImposta: false, creditoAnnoPrec: false });
+});
+
+test('applyDichiarazioneOverrides: override acconti cambia il saldo', () => {
+  const a = applyDichiarazioneOverrides(fakeScenario(), { accontiVersati: 2000 });
+  assert.equal(a.accontiVersati, 2000);
+  assert.equal(a.overridden.accontiVersati, true);
+  assert.equal(a.saldoEffettivo, 415);      // 2415 − 2000
+  assert.equal(a.creditoDaRiportare, 0);
+});
+
+test('applyDichiarazioneOverrides: crediti + credito anno prec riducono il saldo, eccedenza → RX4', () => {
+  const a = applyDichiarazioneOverrides(fakeScenario(), { creditiImposta: 500, creditoAnnoPrec: 2200 });
+  // detrazioni = 500 + 1000(acc default) + 2200 = 3700 > 2415
+  assert.equal(a.saldoEffettivo, 0);
+  assert.equal(a.creditoDaRiportare, 1285); // 3700 − 2415
+  assert.deepEqual(a.overridden, { accontiVersati: false, creditiImposta: true, creditoAnnoPrec: true });
+});
+
+test('applyDichiarazioneOverrides: valori non validi (neg/NaN/null) → default, non overridden', () => {
+  const a = applyDichiarazioneOverrides(fakeScenario(), { accontiVersati: -5, creditiImposta: null });
+  assert.equal(a.accontiVersati, 1000); // default
+  assert.equal(a.overridden.accontiVersati, false);
+  assert.equal(a.creditiImposta, 0);
+  assert.equal(a.overridden.creditiImposta, false);
 });

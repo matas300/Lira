@@ -15,7 +15,7 @@ import type { ForfettarioScenario } from './tax-engine';
 import { buildAccontoPlan, buildContributiAccontoPlan } from './tax-engine';
 import { buildRolledDueDate } from '@shared/date-rules';
 
-export type RigoSource = 'computed' | 'from-profile' | 'zero';
+export type RigoSource = 'computed' | 'from-profile' | 'zero' | 'override';
 export interface Rigo {
   key: string;
   label: string;
@@ -87,6 +87,20 @@ export interface DichiarazioneInput {
   anagrafica: DichiarazioneAnagrafica;
   dataInizioAttivita?: string;
 }
+export interface DichiarazioneOverridesInput {
+  accontiVersati?: number | null;
+  creditiImposta?: number | null;
+  creditoAnnoPrec?: number | null;
+}
+export interface DichiarazioneOverridesApplied {
+  imposta: number;
+  accontiVersati: number;
+  creditiImposta: number;
+  creditoAnnoPrec: number;
+  saldoEffettivo: number;
+  creditoDaRiportare: number;
+  overridden: { accontiVersati: boolean; creditiImposta: boolean; creditoAnnoPrec: boolean };
+}
 
 // r2: rete di sicurezza a 2 decimali. NON usa ceil2 come il tax-engine perché
 // questo layer NON arrotonda fiscalmente — i valori autoritativi arrivano già
@@ -96,6 +110,36 @@ function r2(n: number): number {
 }
 function rigo(key: string, label: string, value: number, source: RigoSource = 'computed'): Rigo {
   return { key, label, value: r2(value), source };
+}
+
+/** Override ammesso solo se numero finito ≥ 0; altrimenti si usa il default calcolato. */
+function pickOverride(v: number | null | undefined, fallback: number): { value: number; overridden: boolean } {
+  if (typeof v === 'number' && Number.isFinite(v) && v >= 0) return { value: r2(v), overridden: true };
+  return { value: r2(fallback), overridden: false };
+}
+
+/**
+ * Applica le rettifiche manuali (6C) a valle dello scenario. Default = valori
+ * calcolati di 6A → invariante di non-regressione. Imposta NON è override-abile.
+ */
+export function applyDichiarazioneOverrides(
+  s: ForfettarioScenario, ov: DichiarazioneOverridesInput,
+): DichiarazioneOverridesApplied {
+  const imposta = r2(s.substituteTax);
+  const accDefault = Math.max(0, r2(s.substituteTax - s.taxSaldo)); // acconti imputati (6A)
+  const acc = pickOverride(ov.accontiVersati, accDefault);
+  const cred = pickOverride(ov.creditiImposta, 0);
+  const credPrev = pickOverride(ov.creditoAnnoPrec, 0);
+  const detrazioni = r2(acc.value + cred.value + credPrev.value);
+  return {
+    imposta,
+    accontiVersati: acc.value,
+    creditiImposta: cred.value,
+    creditoAnnoPrec: credPrev.value,
+    saldoEffettivo: Math.max(0, r2(imposta - detrazioni)),
+    creditoDaRiportare: Math.max(0, r2(detrazioni - imposta)),
+    overridden: { accontiVersati: acc.overridden, creditiImposta: cred.overridden, creditoAnnoPrec: credPrev.overridden },
+  };
 }
 
 /** Quadro LM (forfettario): mappa reddito e imposta sostitutiva dallo scenario. */
