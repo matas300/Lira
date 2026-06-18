@@ -123,6 +123,7 @@ function input(over: Partial<DichiarazioneInput> = {}): DichiarazioneInput {
     year: 2025, scenario: fakeScenario(), ys: ysBase,
     anagrafica: { cf: 'RSSMRA80A01H501U', nome: 'Mario', cognome: 'Rossi', data_nascita: '1980-01-01', residenza: { citta: 'Roma', provincia: 'RM' } },
     dataInizioAttivita: '2022-01-01',
+    overrides: {},
     ...over,
   };
 }
@@ -165,7 +166,7 @@ test('buildWarnings: RS informativo sempre info', () => {
 
 test('buildDichiarazione: assembla tutti i quadri', () => {
   const d = buildDichiarazione(input());
-  assert.equal(d.quadroLM.length, 8);
+  assert.equal(d.quadroLM.length, 9);
   assert.equal(d.quadroRR.sezione, 'artigiani_commercianti');
   assert.equal(d.quadroRX.length, 2);
   assert.equal(d.frontespizio.regime, 'RF19');
@@ -365,4 +366,19 @@ test('applyDichiarazioneOverrides: valori non validi (neg/NaN/null) → default,
   assert.equal(a.overridden.accontiVersati, false);
   assert.equal(a.creditiImposta, 0);
   assert.equal(a.overridden.creditiImposta, false);
+});
+
+test('buildDichiarazione: override attivo → LM45 ridotto e warning DICH_OVERRIDE_ATTIVO', () => {
+  const d = buildDichiarazione(input({ overrides: { creditoAnnoPrec: 415 } }));
+  const lm45 = d.quadroLM.find((r) => r.key === 'LM45')!;
+  assert.equal(lm45.value, 1000); // 1415 − 415
+  assert.ok(d.warnings.some((w) => w.code === 'DICH_OVERRIDE_ATTIVO' && w.severity === 'info'));
+  // coerenza F24
+  assert.equal(d.f24[0]!.righe.find((r) => r.codice === '1792')!.importo, 1000);
+});
+
+test('buildDichiarazione: nessun override → niente warning DICH_OVERRIDE_ATTIVO, numeri 6A', () => {
+  const d = buildDichiarazione(input());
+  assert.equal(d.quadroLM.find((r) => r.key === 'LM45')!.value, 1415);
+  assert.ok(!d.warnings.some((w) => w.code === 'DICH_OVERRIDE_ATTIVO'));
 });

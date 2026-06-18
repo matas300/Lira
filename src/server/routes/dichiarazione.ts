@@ -77,6 +77,7 @@ dichiarazioneRoute.get('/:year', async (c) => {
   const dichiarazione = buildDichiarazione({
     year, scenario, ys, anagrafica,
     dataInizioAttivita: attivita.data_inizio_attivita,
+    overrides: {},
   });
 
   return c.json({ year, needsConfig: false, dichiarazione });

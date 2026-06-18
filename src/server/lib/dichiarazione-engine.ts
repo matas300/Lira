@@ -86,6 +86,7 @@ export interface DichiarazioneInput {
   ys: DichiarazioneYsView;
   anagrafica: DichiarazioneAnagrafica;
   dataInizioAttivita?: string;
+  overrides: DichiarazioneOverridesInput;
 }
 export interface DichiarazioneOverridesInput {
   accontiVersati?: number | null;
@@ -330,14 +331,20 @@ export function buildF24Warnings(
 
 /** Assembla la dichiarazione completa dai dati dell'anno. */
 export function buildDichiarazione(inp: DichiarazioneInput): Dichiarazione {
-  const f24 = buildF24(inp.scenario, inp.ys, inp.year);
+  const applied = applyDichiarazioneOverrides(inp.scenario, inp.overrides);
+  const f24 = buildF24(inp.scenario, inp.ys, inp.year, applied);
+  const warnings: DichiarazioneWarning[] = [...buildWarnings(inp), ...buildF24Warnings(f24, inp.scenario, inp.ys)];
+  const anyOverride = applied.overridden.accontiVersati || applied.overridden.creditiImposta || applied.overridden.creditoAnnoPrec;
+  if (anyOverride) {
+    warnings.push({ code: 'DICH_OVERRIDE_ATTIVO', severity: 'info', message: 'Rettifiche manuali attive: alcuni importi sono stati impostati manualmente e differiscono dal calcolo automatico.' });
+  }
   return {
     frontespizio: buildFrontespizio(inp),
-    quadroLM: buildQuadroLM(inp.scenario),
+    quadroLM: buildQuadroLM(inp.scenario, applied),
     quadroRR: buildQuadroRR(inp.scenario, inp.ys.inpsMode),
-    quadroRX: buildQuadroRX(),
+    quadroRX: buildQuadroRX(applied),
     quadroRS: buildQuadroRS(),
     f24,
-    warnings: [...buildWarnings(inp), ...buildF24Warnings(f24, inp.scenario, inp.ys)],
+    warnings,
   };
 }
