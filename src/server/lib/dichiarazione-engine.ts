@@ -268,6 +268,22 @@ export function buildF24(s: ForfettarioScenario, ys: DichiarazioneYsView, year: 
   return moduli;
 }
 
+/** Warning specifici dell'F24 (info, non bloccanti). */
+export function buildF24Warnings(
+  f24: F24Modulo[], s: ForfettarioScenario, ys: DichiarazioneYsView,
+): DichiarazioneWarning[] {
+  const w: DichiarazioneWarning[] = [];
+  if (ys.regime !== 'forfettario') return w;
+  const taxAcc = buildAccontoPlan(s.substituteTax);
+  if (s.substituteTax > 0 && taxAcc.total === 0) {
+    w.push({ code: 'F24_ACCONTI_SOTTO_SOGLIA', severity: 'info', message: 'Imposta sostitutiva sotto la soglia di 51,65 €: nessun acconto dovuto per l\'anno successivo.' });
+  }
+  if (f24.length > 0) {
+    w.push({ code: 'F24_INPS_SEDE_MANCANTE', severity: 'info', message: 'Prospetto di calcolo: sede e matricola INPS non sono incluse, quindi l\'F24 non è pronto per la trasmissione.' });
+  }
+  return w;
+}
+
 /** Assembla la dichiarazione completa dai dati dell'anno. */
 export function buildDichiarazione(inp: DichiarazioneInput): Dichiarazione {
   return {

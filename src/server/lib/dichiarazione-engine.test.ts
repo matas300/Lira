@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildQuadroLM, buildQuadroRR, buildQuadroRX, buildQuadroRS } from './dichiarazione-engine';
 import { buildFrontespizio, buildWarnings, buildDichiarazione } from './dichiarazione-engine';
-import { inpsCausale, buildF24 } from './dichiarazione-engine';
+import { inpsCausale, buildF24, buildF24Warnings } from './dichiarazione-engine';
 import type { DichiarazioneInput, DichiarazioneYsView } from './dichiarazione-engine';
 import type { ForfettarioScenario } from './tax-engine';
 
@@ -224,4 +224,22 @@ test('buildF24: proroga sposta solo il 30/06, non il 30/11', () => {
 test('buildF24: regime non forfettario → nessun modulo', () => {
   const mods = buildF24(fakeScenario(), { ...ys2025, regime: 'ordinario' }, 2025);
   assert.equal(mods.length, 0);
+});
+
+test('buildF24Warnings: sede INPS mancante quando ci sono moduli', () => {
+  const mods = buildF24(fakeScenario(), { ...ys2025 }, 2025);
+  const w = buildF24Warnings(mods, fakeScenario(), { ...ys2025 });
+  assert.ok(w.some((x) => x.code === 'F24_INPS_SEDE_MANCANTE' && x.severity === 'info'));
+});
+
+test('buildF24Warnings: acconti sotto soglia segnalati (imposta 0<x<51,65)', () => {
+  const s = fakeScenario({ substituteTax: 40, taxSaldo: 0, contributiVariabiliDovuti: 0, contributionSaldo: 0 });
+  const mods = buildF24(s, { ...ys2025 }, 2025);
+  const w = buildF24Warnings(mods, s, { ...ys2025 });
+  assert.ok(w.some((x) => x.code === 'F24_ACCONTI_SOTTO_SOGLIA' && x.severity === 'info'));
+});
+
+test('buildF24Warnings: regime non forfettario → nessun warning F24', () => {
+  const w = buildF24Warnings([], fakeScenario(), { ...ys2025, regime: 'ordinario' });
+  assert.equal(w.length, 0);
 });
