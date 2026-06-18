@@ -271,7 +271,7 @@ function resolveGiugno(year: number, prorogaSaldoAt: string | null): ResolvedDue
  * Acconti N+1 RICALCOLATI sulla base imposta(N)/contributi(N). Righe a 0 omesse;
  * moduli senza righe non emessi.
  */
-export function buildF24(s: ForfettarioScenario, ys: DichiarazioneYsView, year: number): F24Modulo[] {
+export function buildF24(s: ForfettarioScenario, ys: DichiarazioneYsView, year: number, a: DichiarazioneOverridesApplied): F24Modulo[] {
   if (ys.regime !== 'forfettario') return [];
 
   const taxAcc = buildAccontoPlan(s.substituteTax);
@@ -285,7 +285,7 @@ export function buildF24(s: ForfettarioScenario, ys: DichiarazioneYsView, year: 
   const novembre = buildRolledDueDate(novembreBase);
 
   const righeGiugno = [
-    f24Riga('erario', F24_ERARIO.saldo, 'Imposta sostitutiva — saldo', year, s.taxSaldo),
+    f24Riga('erario', F24_ERARIO.saldo, 'Imposta sostitutiva — saldo', year, a.saldoEffettivo),
     f24Riga('erario', F24_ERARIO.acc1, 'Imposta sostitutiva — acconto 1ª rata', year + 1, taxAcc.first),
     f24Riga('inps', causale, 'Contributi INPS variabili — saldo', year, s.contributionSaldo),
     f24Riga('inps', causale, 'Contributi INPS variabili — acconto 1ª rata', year + 1, inpsAcc.first),

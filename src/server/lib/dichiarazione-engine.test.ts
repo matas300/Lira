@@ -192,7 +192,8 @@ const ys2025 = {
 
 test('buildF24: due moduli 30/06 e 30/11 dell\'anno N+1', () => {
   // scenario default: substituteTax 2415, taxSaldo 1415, contributiVariabiliDovuti 1200, contributionSaldo 0
-  const mods = buildF24(fakeScenario(), { ...ys2025 }, 2025);
+  const sF24 = fakeScenario();
+  const mods = buildF24(sF24, { ...ys2025 }, 2025, applyDichiarazioneOverrides(sF24, {}));
   assert.equal(mods.length, 2);
 
   const giugno = mods[0]!;
@@ -219,20 +220,23 @@ test('buildF24: due moduli 30/06 e 30/11 dell\'anno N+1', () => {
 
 test('buildF24: acconto base è imposta(N) lorda, NON il saldo', () => {
   // substituteTax 2415 → acconti 1207.5/1207.5, indipendenti da taxSaldo 1415
-  const mods = buildF24(fakeScenario({ taxSaldo: 1 }), { ...ys2025 }, 2025);
+  const sF24 = fakeScenario({ taxSaldo: 1 });
+  const mods = buildF24(sF24, { ...ys2025 }, 2025, applyDichiarazioneOverrides(sF24, {}));
   const acc1 = mods[0]!.righe.find((r) => r.codice === '1790')!;
   assert.equal(acc1.importo, 1207.5);
 });
 
 test('buildF24: saldo INPS valorizzato compare in sezione INPS anno N', () => {
-  const mods = buildF24(fakeScenario({ contributionSaldo: 350 }), { ...ys2025 }, 2025);
+  const sF24 = fakeScenario({ contributionSaldo: 350 });
+  const mods = buildF24(sF24, { ...ys2025 }, 2025, applyDichiarazioneOverrides(sF24, {}));
   const inpsSaldo = mods[0]!.righe.find((r) => r.sezione === 'inps' && r.annoRiferimento === 2025)!;
   assert.equal(inpsSaldo.codice, 'AP');
   assert.equal(inpsSaldo.importo, 350);
 });
 
 test('buildF24: banda unico-novembre (51,65 ≤ imposta < 257,52) → acc1=0 omesso, acc2 pieno', () => {
-  const mods = buildF24(fakeScenario({ substituteTax: 100, taxSaldo: 0, contributiVariabiliDovuti: 0, contributionSaldo: 0 }), { ...ys2025 }, 2025);
+  const sF24 = fakeScenario({ substituteTax: 100, taxSaldo: 0, contributiVariabiliDovuti: 0, contributionSaldo: 0 });
+  const mods = buildF24(sF24, { ...ys2025 }, 2025, applyDichiarazioneOverrides(sF24, {}));
   // giugno: nessun acconto sostitutiva (first=0), nessun saldo (0) → modulo vuoto omesso
   // novembre: acconto unico 100
   assert.equal(mods.length, 1);
@@ -241,15 +245,18 @@ test('buildF24: banda unico-novembre (51,65 ≤ imposta < 257,52) → acc1=0 ome
 });
 
 test('buildF24: imposta sotto soglia (<51,65) e niente saldo → nessun modulo', () => {
-  const mods = buildF24(fakeScenario({ substituteTax: 40, taxSaldo: 0, contributiVariabiliDovuti: 0, contributionSaldo: 0 }), { ...ys2025 }, 2025);
+  const sF24 = fakeScenario({ substituteTax: 40, taxSaldo: 0, contributiVariabiliDovuti: 0, contributionSaldo: 0 });
+  const mods = buildF24(sF24, { ...ys2025 }, 2025, applyDichiarazioneOverrides(sF24, {}));
   assert.equal(mods.length, 0);
 });
 
 test('buildF24: gestione separata usa causale P10 e acconto 80% (40/40)', () => {
+  const sF24 = fakeScenario({ contributiVariabiliDovuti: 1000, contributionSaldo: 0 });
   const mods = buildF24(
-    fakeScenario({ contributiVariabiliDovuti: 1000, contributionSaldo: 0 }),
+    sF24,
     { ...ys2025, inpsMode: 'gestione_separata', inpsCategoria: null },
     2025,
+    applyDichiarazioneOverrides(sF24, {}),
   );
   const inpsAcc1 = mods[0]!.righe.find((r) => r.sezione === 'inps')!;
   assert.equal(inpsAcc1.codice, 'P10');
@@ -259,7 +266,8 @@ test('buildF24: gestione separata usa causale P10 e acconto 80% (40/40)', () => 
 });
 
 test('buildF24: proroga sposta solo il 30/06, non il 30/11', () => {
-  const mods = buildF24(fakeScenario(), { ...ys2025, prorogaSaldoAt: '2026-07-31' }, 2025);
+  const sF24 = fakeScenario();
+  const mods = buildF24(sF24, { ...ys2025, prorogaSaldoAt: '2026-07-31' }, 2025, applyDichiarazioneOverrides(sF24, {}));
   assert.equal(mods[0]!.scadenza, '2026-07-31');
   assert.equal(mods[0]!.prorogaApplied, true);
   assert.equal(mods[1]!.scadenza, '2026-11-30');
@@ -267,19 +275,21 @@ test('buildF24: proroga sposta solo il 30/06, non il 30/11', () => {
 });
 
 test('buildF24: regime non forfettario → nessun modulo', () => {
-  const mods = buildF24(fakeScenario(), { ...ys2025, regime: 'ordinario' }, 2025);
+  const sF24 = fakeScenario();
+  const mods = buildF24(sF24, { ...ys2025, regime: 'ordinario' }, 2025, applyDichiarazioneOverrides(sF24, {}));
   assert.equal(mods.length, 0);
 });
 
 test('buildF24Warnings: sede INPS mancante quando ci sono moduli', () => {
-  const mods = buildF24(fakeScenario(), { ...ys2025 }, 2025);
+  const sF24 = fakeScenario();
+  const mods = buildF24(sF24, { ...ys2025 }, 2025, applyDichiarazioneOverrides(sF24, {}));
   const w = buildF24Warnings(mods, fakeScenario(), { ...ys2025 });
   assert.ok(w.some((x) => x.code === 'F24_INPS_SEDE_MANCANTE' && x.severity === 'info'));
 });
 
 test('buildF24Warnings: acconti sotto soglia segnalati (imposta 0<x<51,65)', () => {
   const s = fakeScenario({ substituteTax: 40, taxSaldo: 0, contributiVariabiliDovuti: 0, contributionSaldo: 0 });
-  const mods = buildF24(s, { ...ys2025 }, 2025);
+  const mods = buildF24(s, { ...ys2025 }, 2025, applyDichiarazioneOverrides(s, {}));
   const w = buildF24Warnings(mods, s, { ...ys2025 });
   assert.ok(w.some((x) => x.code === 'F24_ACCONTI_SOTTO_SOGLIA' && x.severity === 'info'));
 });
@@ -291,7 +301,7 @@ test('buildF24Warnings: regime non forfettario → nessun warning F24', () => {
 
 test('GOLDEN F24: commerciante usa CP, importi bloccati', () => {
   const s = fakeScenario({ substituteTax: 3000, taxSaldo: 1200, contributiVariabiliDovuti: 800, contributionSaldo: 200 });
-  const mods = buildF24(s, { ...ys2025, inpsCategoria: 'commerciante' }, 2025);
+  const mods = buildF24(s, { ...ys2025, inpsCategoria: 'commerciante' }, 2025, applyDichiarazioneOverrides(s, {}));
   // giugno: 1792=1200(2025), 1790=1500(2026), CP saldo=200(2025), CP acc1=400(2026)
   assert.deepEqual(mods[0]!.righe.map((r) => [r.codice, r.annoRiferimento, r.importo]), [
     ['1792', 2025, 1200], ['1790', 2026, 1500], ['CP', 2025, 200], ['CP', 2026, 400],
@@ -302,6 +312,23 @@ test('GOLDEN F24: commerciante usa CP, importi bloccati', () => {
     ['1791', 2026, 1500], ['CP', 2026, 400],
   ]);
   assert.equal(mods[1]!.totale, 1900);
+});
+
+test('buildF24: il tributo 1792 usa saldoEffettivo (override azzera saldo → riga 1792 omessa)', () => {
+  const s = fakeScenario(); // taxSaldo 1415
+  const a = applyDichiarazioneOverrides(s, { accontiVersati: 2415 }); // saldoEffettivo = 0
+  const mods = buildF24(s, { ...ys2025 }, 2025, a);
+  const riga1792 = mods[0]!.righe.find((r) => r.codice === '1792');
+  assert.equal(riga1792, undefined); // importo 0 → omessa
+  // gli acconti su N+1 restano (base substituteTax 2415, non toccati)
+  assert.ok(mods[0]!.righe.some((r) => r.codice === '1790'));
+});
+
+test('buildF24: 1792 riflette il saldoEffettivo ridotto da credito anno prec', () => {
+  const s = fakeScenario();
+  const a = applyDichiarazioneOverrides(s, { creditoAnnoPrec: 415 }); // saldo 1415 − 415 = 1000
+  const mods = buildF24(s, { ...ys2025 }, 2025, a);
+  assert.equal(mods[0]!.righe.find((r) => r.codice === '1792')!.importo, 1000);
 });
 
 test('applyDichiarazioneOverrides: default → invariante 6A (saldoEffettivo === taxSaldo)', () => {
