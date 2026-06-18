@@ -99,6 +99,11 @@ function lmVal(d: Dichiarazione, key: string): number {
     ?? d.quadroRX.find((r) => r.key === key)?.value ?? 0;
 }
 
+function lmSrc(d: Dichiarazione, key: string): string {
+  return d.quadroLM.find((r) => r.key === key)?.source
+    ?? d.quadroRX.find((r) => r.key === key)?.source ?? 'computed';
+}
+
 export function renderRettifiche(d: Dichiarazione): string {
   const acc = lmVal(d, 'LM43');
   const cred = lmVal(d, 'LM39');
@@ -107,9 +112,9 @@ export function renderRettifiche(d: Dichiarazione): string {
     <h3>Rettifiche manuali</h3>
     <p class="dich-note">Imposta i valori solo se differiscono dal calcolo automatico. Lascia vuoto/azzera per usare il valore calcolato.</p>
     <div class="dich-adj-grid">
-      <label>Acconti versati (LM43)<input type="number" step="0.01" min="0" id="adj-acconti" value="${esc(acc)}" data-default="${esc(acc)}"></label>
-      <label>Crediti d'imposta (LM39)<input type="number" step="0.01" min="0" id="adj-crediti" value="${esc(cred)}" data-default="${esc(cred)}"></label>
-      <label>Credito anno precedente (RX1)<input type="number" step="0.01" min="0" id="adj-credprec" value="${esc(rx1)}" data-default="${esc(rx1)}"></label>
+      <label>Acconti versati (LM43)<input type="number" step="0.01" min="0" id="adj-acconti" value="${esc(acc)}" data-default="${esc(acc)}" data-overridden="${esc(lmSrc(d, 'LM43') === 'override')}"></label>
+      <label>Crediti d'imposta (LM39)<input type="number" step="0.01" min="0" id="adj-crediti" value="${esc(cred)}" data-default="${esc(cred)}" data-overridden="${esc(lmSrc(d, 'LM39') === 'override')}"></label>
+      <label>Credito anno precedente (RX1)<input type="number" step="0.01" min="0" id="adj-credprec" value="${esc(rx1)}" data-default="${esc(rx1)}" data-overridden="${esc(lmSrc(d, 'RX1') === 'override')}"></label>
     </div>
     <div class="dich-adj-actions">
       <button class="btn btn-primary" type="button" id="adj-save">Salva rettifiche</button>
@@ -160,9 +165,10 @@ export function mount(container: HTMLElement): () => void {
         const knob = (id: string): number | null => {
           const el = main.querySelector<HTMLInputElement>(id);
           const v = num(id);
-          if (v == null) return null;
+          if (v == null) return null;                 // vuoto/invalido → torna al calcolato
+          if (el?.dataset.overridden === 'true') return v; // override attivo → preserva/aggiorna, non azzerare
           const def = Number(el?.dataset.default ?? 'NaN');
-          // valore uguale al default calcolato → lascia il computo automatico (no override)
+          // knob calcolato: invia solo se differisce dal default calcolato
           if (Number.isFinite(def) && Math.round(v * 100) === Math.round(def * 100)) return null;
           return v;
         };
