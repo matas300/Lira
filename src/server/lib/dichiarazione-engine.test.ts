@@ -249,3 +249,18 @@ test('buildF24Warnings: regime non forfettario → nessun warning F24', () => {
   const w = buildF24Warnings([], fakeScenario(), { ...ys2025, regime: 'ordinario' });
   assert.equal(w.length, 0);
 });
+
+test('GOLDEN F24: commerciante usa CP, importi bloccati', () => {
+  const s = fakeScenario({ substituteTax: 3000, taxSaldo: 1200, contributiVariabiliDovuti: 800, contributionSaldo: 200 });
+  const mods = buildF24(s, { ...ys2025, inpsCategoria: 'commerciante' }, 2025);
+  // giugno: 1792=1200(2025), 1790=1500(2026), CP saldo=200(2025), CP acc1=400(2026)
+  assert.deepEqual(mods[0]!.righe.map((r) => [r.codice, r.annoRiferimento, r.importo]), [
+    ['1792', 2025, 1200], ['1790', 2026, 1500], ['CP', 2025, 200], ['CP', 2026, 400],
+  ]);
+  assert.equal(mods[0]!.totale, 3300);
+  // novembre: 1791=1500(2026), CP acc2=400(2026)
+  assert.deepEqual(mods[1]!.righe.map((r) => [r.codice, r.annoRiferimento, r.importo]), [
+    ['1791', 2026, 1500], ['CP', 2026, 400],
+  ]);
+  assert.equal(mods[1]!.totale, 1900);
+});
