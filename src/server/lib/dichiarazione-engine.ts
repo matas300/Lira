@@ -275,6 +275,9 @@ function resolveGiugno(year: number, prorogaSaldoAt: string | null): ResolvedDue
 export function buildF24(s: ForfettarioScenario, ys: DichiarazioneYsView, year: number, a: DichiarazioneOverridesApplied): F24Modulo[] {
   if (ys.regime !== 'forfettario') return [];
 
+  // Gli acconti su N+1 si basano volutamente sull'imposta grezza dello scenario (s.substituteTax),
+  // NON su a.saldoEffettivo: gli override 6C toccano solo il saldo dell'anno corrente (tributo 1792),
+  // mai la base di ricalcolo degli acconti.
   const taxAcc = buildAccontoPlan(s.substituteTax);
   const gestione = ys.inpsMode === 'gestione_separata' ? 'gestione_separata' : 'artigiani_commercianti';
   const inpsAcc = buildContributiAccontoPlan(s.contributiVariabiliDovuti, gestione);

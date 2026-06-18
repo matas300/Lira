@@ -31,8 +31,6 @@ function fakeScenario(over: Partial<ForfettarioScenario> = {}): ForfettarioScena
   };
 }
 
-const appliedDefault = (over = {}) => applyDichiarazioneOverrides(fakeScenario(over), {});
-
 test('buildQuadroLM: mappa i righi chiave dallo scenario', () => {
   const righi = buildQuadroLM(fakeScenario(), applyDichiarazioneOverrides(fakeScenario(), {}));
   const by = (k: string) => righi.find((r) => r.key === k)!;
