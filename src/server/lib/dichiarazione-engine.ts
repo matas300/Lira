@@ -286,12 +286,14 @@ export function buildF24Warnings(
 
 /** Assembla la dichiarazione completa dai dati dell'anno. */
 export function buildDichiarazione(inp: DichiarazioneInput): Dichiarazione {
+  const f24 = buildF24(inp.scenario, inp.ys, inp.year);
   return {
     frontespizio: buildFrontespizio(inp),
     quadroLM: buildQuadroLM(inp.scenario),
     quadroRR: buildQuadroRR(inp.scenario, inp.ys.inpsMode),
     quadroRX: buildQuadroRX(),
     quadroRS: buildQuadroRS(),
-    warnings: buildWarnings(inp),
+    f24,
+    warnings: [...buildWarnings(inp), ...buildF24Warnings(f24, inp.scenario, inp.ys)],
   };
 }

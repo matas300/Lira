@@ -76,8 +76,8 @@ test('buildQuadroRS: vuoto in 6A (informativo, popolato in 6C)', () => {
 });
 
 const ysBase: DichiarazioneYsView = {
-  regime: 'forfettario', inpsMode: 'artigiani_commercianti',
-  impostaSostitutiva: 0.15, coefficiente: 0.67, limiteForfettario: 85000,
+  regime: 'forfettario', inpsMode: 'artigiani_commercianti', inpsCategoria: 'artigiano',
+  impostaSostitutiva: 0.15, coefficiente: 0.67, limiteForfettario: 85000, prorogaSaldoAt: null,
 };
 function input(over: Partial<DichiarazioneInput> = {}): DichiarazioneInput {
   return {
@@ -131,6 +131,12 @@ test('buildDichiarazione: assembla tutti i quadri', () => {
   assert.equal(d.quadroRX.length, 2);
   assert.equal(d.frontespizio.regime, 'RF19');
   assert.ok(Array.isArray(d.warnings));
+});
+
+test('buildDichiarazione: include f24 e i warning F24', () => {
+  const d = buildDichiarazione(input());
+  assert.equal(d.f24.length, 2);
+  assert.ok(d.warnings.some((w) => w.code === 'F24_INPS_SEDE_MANCANTE'));
 });
 
 test('inpsCausale: artigiani/commercianti/gestione separata', () => {

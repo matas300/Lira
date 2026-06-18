@@ -9,6 +9,7 @@ const dich: Dichiarazione = {
   quadroRR: { sezione: 'artigiani_commercianti', righi: [{ key: 'RR_TOTALE', label: 'Totale', value: 5200, source: 'computed' }] },
   quadroRX: [{ key: 'RX1', label: 'Credito', value: 0, source: 'zero' }],
   quadroRS: [],
+  f24: [],
   warnings: [{ code: 'RS_INFORMATIVO', severity: 'info', message: 'RS informativo' }],
 };
 
