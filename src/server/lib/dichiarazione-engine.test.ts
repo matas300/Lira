@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildQuadroLM, buildQuadroRR, buildQuadroRX, buildQuadroRS } from './dichiarazione-engine';
 import { buildFrontespizio, buildWarnings, buildDichiarazione } from './dichiarazione-engine';
-import { inpsCausale } from './dichiarazione-engine';
+import { inpsCausale, buildF24 } from './dichiarazione-engine';
 import type { DichiarazioneInput, DichiarazioneYsView } from './dichiarazione-engine';
 import type { ForfettarioScenario } from './tax-engine';
 
@@ -138,4 +138,90 @@ test('inpsCausale: artigiani/commercianti/gestione separata', () => {
   assert.equal(inpsCausale('artigiani_commercianti', 'commerciante'), 'CP');
   assert.equal(inpsCausale('artigiani_commercianti', 'artigiano'), 'AP');
   assert.equal(inpsCausale('artigiani_commercianti', null), 'AP'); // default artigiano
+});
+
+const ys2025 = {
+  regime: 'forfettario', inpsMode: 'artigiani_commercianti', inpsCategoria: 'artigiano',
+  impostaSostitutiva: 0.15, coefficiente: 0.67, limiteForfettario: 85000, prorogaSaldoAt: null,
+} as const;
+
+test('buildF24: due moduli 30/06 e 30/11 dell\'anno N+1', () => {
+  // scenario default: substituteTax 2415, taxSaldo 1415, contributiVariabiliDovuti 1200, contributionSaldo 0
+  const mods = buildF24(fakeScenario(), { ...ys2025 }, 2025);
+  assert.equal(mods.length, 2);
+
+  const giugno = mods[0]!;
+  assert.equal(giugno.scadenzaOriginale, '2026-06-30');
+  assert.equal(giugno.scadenza, '2026-06-30'); // 30/06/2026 è martedì, nessun rolling
+  assert.equal(giugno.prorogaApplied, false);
+  // saldo sostitutiva (anno 2025) + acconto 1 (anno 2026); INPS saldo 0 omesso, INPS acc1 600
+  assert.deepEqual(giugno.righe.map((r) => [r.sezione, r.codice, r.annoRiferimento, r.importo]), [
+    ['erario', '1792', 2025, 1415],
+    ['erario', '1790', 2026, 1207.5],
+    ['inps', 'AP', 2026, 600],
+  ]);
+  assert.equal(giugno.totale, 3222.5);
+
+  const nov = mods[1]!;
+  assert.equal(nov.scadenzaOriginale, '2026-11-30');
+  assert.equal(nov.scadenza, '2026-11-30'); // 30/11/2026 è lunedì, nessun rolling
+  assert.deepEqual(nov.righe.map((r) => [r.sezione, r.codice, r.annoRiferimento, r.importo]), [
+    ['erario', '1791', 2026, 1207.5],
+    ['inps', 'AP', 2026, 600],
+  ]);
+  assert.equal(nov.totale, 1807.5);
+});
+
+test('buildF24: acconto base è imposta(N) lorda, NON il saldo', () => {
+  // substituteTax 2415 → acconti 1207.5/1207.5, indipendenti da taxSaldo 1415
+  const mods = buildF24(fakeScenario({ taxSaldo: 1 }), { ...ys2025 }, 2025);
+  const acc1 = mods[0]!.righe.find((r) => r.codice === '1790')!;
+  assert.equal(acc1.importo, 1207.5);
+});
+
+test('buildF24: saldo INPS valorizzato compare in sezione INPS anno N', () => {
+  const mods = buildF24(fakeScenario({ contributionSaldo: 350 }), { ...ys2025 }, 2025);
+  const inpsSaldo = mods[0]!.righe.find((r) => r.sezione === 'inps' && r.annoRiferimento === 2025)!;
+  assert.equal(inpsSaldo.codice, 'AP');
+  assert.equal(inpsSaldo.importo, 350);
+});
+
+test('buildF24: banda unico-novembre (51,65 ≤ imposta < 257,52) → acc1=0 omesso, acc2 pieno', () => {
+  const mods = buildF24(fakeScenario({ substituteTax: 100, taxSaldo: 0, contributiVariabiliDovuti: 0, contributionSaldo: 0 }), { ...ys2025 }, 2025);
+  // giugno: nessun acconto sostitutiva (first=0), nessun saldo (0) → modulo vuoto omesso
+  // novembre: acconto unico 100
+  assert.equal(mods.length, 1);
+  assert.equal(mods[0]!.scadenzaOriginale, '2026-11-30');
+  assert.deepEqual(mods[0]!.righe.map((r) => [r.codice, r.importo]), [['1791', 100]]);
+});
+
+test('buildF24: imposta sotto soglia (<51,65) e niente saldo → nessun modulo', () => {
+  const mods = buildF24(fakeScenario({ substituteTax: 40, taxSaldo: 0, contributiVariabiliDovuti: 0, contributionSaldo: 0 }), { ...ys2025 }, 2025);
+  assert.equal(mods.length, 0);
+});
+
+test('buildF24: gestione separata usa causale P10 e acconto 80% (40/40)', () => {
+  const mods = buildF24(
+    fakeScenario({ contributiVariabiliDovuti: 1000, contributionSaldo: 0 }),
+    { ...ys2025, inpsMode: 'gestione_separata', inpsCategoria: null },
+    2025,
+  );
+  const inpsAcc1 = mods[0]!.righe.find((r) => r.sezione === 'inps')!;
+  assert.equal(inpsAcc1.codice, 'P10');
+  assert.equal(inpsAcc1.importo, 400); // 1000 × 40%
+  const inpsAcc2 = mods[1]!.righe.find((r) => r.sezione === 'inps')!;
+  assert.equal(inpsAcc2.importo, 400);
+});
+
+test('buildF24: proroga sposta solo il 30/06, non il 30/11', () => {
+  const mods = buildF24(fakeScenario(), { ...ys2025, prorogaSaldoAt: '2026-07-31' }, 2025);
+  assert.equal(mods[0]!.scadenza, '2026-07-31');
+  assert.equal(mods[0]!.prorogaApplied, true);
+  assert.equal(mods[1]!.scadenza, '2026-11-30');
+  assert.equal(mods[1]!.prorogaApplied, false);
+});
+
+test('buildF24: regime non forfettario → nessun modulo', () => {
+  const mods = buildF24(fakeScenario(), { ...ys2025, regime: 'ordinario' }, 2025);
+  assert.equal(mods.length, 0);
 });

@@ -12,6 +12,8 @@
 // acconti sono già year-aware nello scenario.
 
 import type { ForfettarioScenario } from './tax-engine';
+import { buildAccontoPlan, buildContributiAccontoPlan } from './tax-engine';
+import { buildRolledDueDate } from '@shared/date-rules';
 
 export type RigoSource = 'computed' | 'from-profile' | 'zero';
 export interface Rigo {
@@ -72,9 +74,11 @@ export interface DichiarazioneAnagrafica {
 export interface DichiarazioneYsView {
   regime: string;
   inpsMode: string;
+  inpsCategoria: string | null;
   impostaSostitutiva: number;
   coefficiente: number;
   limiteForfettario: number;
+  prorogaSaldoAt: string | null;
 }
 export interface DichiarazioneInput {
   year: number;
@@ -202,6 +206,66 @@ export function buildWarnings(inp: DichiarazioneInput): DichiarazioneWarning[] {
 export function inpsCausale(inpsMode: string, inpsCategoria: string | null): string {
   if (inpsMode === 'gestione_separata') return 'P10';
   return inpsCategoria === 'commerciante' ? 'CP' : 'AP';
+}
+
+const F24_ERARIO = { saldo: '1792', acc1: '1790', acc2: '1791' } as const;
+
+function f24Riga(sezione: F24Sezione, codice: string, descrizione: string, annoRiferimento: number, importo: number): F24Riga {
+  return { sezione, codice, descrizione, annoRiferimento, importo: r2(importo) };
+}
+
+interface ResolvedDue { scadenza: string; prorogaApplied: boolean; }
+function resolveGiugno(year: number, prorogaSaldoAt: string | null): ResolvedDue {
+  if (prorogaSaldoAt) return { scadenza: prorogaSaldoAt, prorogaApplied: true };
+  return { scadenza: buildRolledDueDate(`${year + 1}-06-30`).date, prorogaApplied: false };
+}
+
+/**
+ * Moduli F24 da dichiarazione (anno d'imposta N → versamenti N+1):
+ * 30/06/N+1 = saldo sostitutiva (anno N) + acconto 1 (anno N+1) + saldo/acconto1 INPS;
+ * 30/11/N+1 = acconto 2 (anno N+1) + acconto 2 INPS.
+ * Acconti N+1 RICALCOLATI sulla base imposta(N)/contributi(N). Righe a 0 omesse;
+ * moduli senza righe non emessi.
+ */
+export function buildF24(s: ForfettarioScenario, ys: DichiarazioneYsView, year: number): F24Modulo[] {
+  if (ys.regime !== 'forfettario') return [];
+
+  const taxAcc = buildAccontoPlan(s.substituteTax);
+  const gestione = ys.inpsMode === 'gestione_separata' ? 'gestione_separata' : 'artigiani_commercianti';
+  const inpsAcc = buildContributiAccontoPlan(s.contributiVariabiliDovuti, gestione);
+  const causale = inpsCausale(ys.inpsMode, ys.inpsCategoria);
+
+  const giugnoBase = `${year + 1}-06-30`;
+  const novembreBase = `${year + 1}-11-30`;
+  const giugno = resolveGiugno(year, ys.prorogaSaldoAt);
+  const novembre = buildRolledDueDate(novembreBase);
+
+  const righeGiugno = [
+    f24Riga('erario', F24_ERARIO.saldo, 'Imposta sostitutiva — saldo', year, s.taxSaldo),
+    f24Riga('erario', F24_ERARIO.acc1, 'Imposta sostitutiva — acconto 1ª rata', year + 1, taxAcc.first),
+    f24Riga('inps', causale, 'Contributi INPS variabili — saldo', year, s.contributionSaldo),
+    f24Riga('inps', causale, 'Contributi INPS variabili — acconto 1ª rata', year + 1, inpsAcc.first),
+  ].filter((r) => r.importo > 0);
+
+  const righeNovembre = [
+    f24Riga('erario', F24_ERARIO.acc2, 'Imposta sostitutiva — acconto 2ª rata', year + 1, taxAcc.second),
+    f24Riga('inps', causale, 'Contributi INPS variabili — acconto 2ª rata', year + 1, inpsAcc.second),
+  ].filter((r) => r.importo > 0);
+
+  const moduli: F24Modulo[] = [];
+  if (righeGiugno.length) {
+    moduli.push({
+      scadenza: giugno.scadenza, scadenzaOriginale: giugnoBase, prorogaApplied: giugno.prorogaApplied,
+      righe: righeGiugno, totale: r2(righeGiugno.reduce((a, r) => a + r.importo, 0)),
+    });
+  }
+  if (righeNovembre.length) {
+    moduli.push({
+      scadenza: novembre.date, scadenzaOriginale: novembreBase, prorogaApplied: false,
+      righe: righeNovembre, totale: r2(righeNovembre.reduce((a, r) => a + r.importo, 0)),
+    });
+  }
+  return moduli;
 }
 
 /** Assembla la dichiarazione completa dai dati dell'anno. */
