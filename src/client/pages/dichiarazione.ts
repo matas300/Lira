@@ -8,7 +8,7 @@
 import { api, ApiError } from '../lib/api';
 import { esc, mountPage } from '../lib/dom';
 import { getYear } from '../lib/year';
-import type { Dichiarazione, Frontespizio, Rigo, DichiarazioneWarning } from '@server/lib/dichiarazione-engine';
+import type { Dichiarazione, Frontespizio, Rigo, DichiarazioneWarning, F24Modulo } from '@server/lib/dichiarazione-engine';
 
 interface DichiarazioneResponse {
   year: number;
@@ -59,6 +59,40 @@ export function renderWarnings(warnings: DichiarazioneWarning[]): string {
   return `<div class="card dich-card dich-warns"><h3>Controlli</h3>${items}</div>`;
 }
 
+function fmtDate(iso: string): string {
+  const [y, m, d] = iso.split('-');
+  return d && m && y ? `${d}/${m}/${y}` : iso;
+}
+
+export function renderF24(moduli: F24Modulo[]): string {
+  if (!moduli.length) return '';
+  const sezione = (titolo: string, righe: F24Modulo['righe']): string => {
+    if (!righe.length) return '';
+    const rows = righe.map((r) =>
+      `<div class="dich-row"><span class="dich-row-k">${esc(r.codice)} · ${esc(r.descrizione)} <span class="dich-src">rif. ${esc(r.annoRiferimento)}</span></span>`
+      + `<span class="dich-row-v">${esc(eur(r.importo))}</span></div>`,
+    ).join('');
+    return `<div class="dich-f24-sez"><h4>${esc(titolo)}</h4>${rows}</div>`;
+  };
+  const cards = moduli.map((m) => {
+    const erario = m.righe.filter((r) => r.sezione === 'erario');
+    const inps = m.righe.filter((r) => r.sezione === 'inps');
+    const proroga = m.prorogaApplied ? ' <span class="dich-src">proroga</span>' : '';
+    return `<div class="card dich-card dich-f24-mod">
+      <h3>F24 — scadenza ${esc(fmtDate(m.scadenza))}${proroga}</h3>
+      ${sezione('Erario', erario)}
+      ${sezione('INPS', inps)}
+      <div class="dich-row dich-f24-tot"><span class="dich-row-k">Totale modulo</span><span class="dich-row-v">${esc(eur(m.totale))}</span></div>
+    </div>`;
+  }).join('');
+  return `<div class="dich-f24">
+    <div class="card dich-card"><h3>Modelli F24</h3>
+      <p class="dich-note">Versamenti da dichiarazione: saldo dell'anno d'imposta + acconti per l'anno successivo. Prospetto di calcolo (sede/matricola INPS escluse).</p>
+    </div>
+    ${cards}
+  </div>`;
+}
+
 export function renderConfigPrompt(year: number): string {
   return `<div class="card dich-card">
     <h2>Dichiarazione ${esc(year)}</h2>
@@ -77,10 +111,7 @@ export function renderPage(d: Dichiarazione): string {
     ${renderQuadro(rrTitolo, d.quadroRR.righi)}
     ${renderQuadro('Quadro RX — Compensazioni', d.quadroRX)}
     ${renderQuadro('Quadro RS — Dati informativi', d.quadroRS)}
-    <div class="card dich-card dich-cta">
-      <div><h3>Modello F24</h3><p class="dich-note">Codici tributo e scadenze dei versamenti: in arrivo.</p></div>
-      <button class="btn" type="button" disabled title="Disponibile prossimamente">Vai all'F24</button>
-    </div>
+    ${renderF24(d.f24)}
   </div>`;
 }
 
