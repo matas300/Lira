@@ -21,11 +21,16 @@ import { loadScenarioData } from '../lib/scenario-data';
 import { buildForfettarioMethodComparison } from '../lib/tax-engine';
 import {
   buildDichiarazione,
+  type Dichiarazione,
   type DichiarazioneAnagrafica,
   type DichiarazioneYsView,
   type DichiarazioneOverridesInput,
 } from '../lib/dichiarazione-engine';
 import type { Db } from '../db/client';
+
+type DichiarazioneResponse =
+  | { year: number; needsConfig: true }
+  | { year: number; needsConfig: false; dichiarazione: Dichiarazione };
 
 export const dichiarazioneRoute = new Hono<AuthEnv>();
 dichiarazioneRoute.use('*', requireSession);
@@ -61,10 +66,31 @@ function readDichiarazioneOverrides(raw: string | null): DichiarazioneOverridesI
 }
 
 /**
+ * Applica un patch di rettifiche 6C al blob `overrides` JSON esistente, in modo
+ * NON-distruttivo: preserva gli altri override (scadenziario / confirmedWarnings).
+ * `null` su una chiave la rimuove (→ default nel motore); chiave assente = invariata.
+ * Ritorna il blob serializzato pronto per la persistenza. Riusa `parseBlob` per il
+ * parse difensivo (stessa logica del GET, non duplicata).
+ */
+function mergeDichiarazioneOverrides(raw: string | null, patch: DichiarazioneOverridesInput): string {
+  const overrides = parseBlob(raw);
+  const dich: Record<string, unknown> = (overrides.dichiarazione && typeof overrides.dichiarazione === 'object' && !Array.isArray(overrides.dichiarazione))
+    ? { ...(overrides.dichiarazione as Record<string, unknown>) } : {};
+  for (const k of ['accontiVersati', 'creditiImposta', 'creditoAnnoPrec'] as const) {
+    if (!(k in patch)) continue;          // non fornito → invariato
+    const v = patch[k];
+    if (v === null) delete dich[k];        // null → torna al default
+    else if (v !== undefined) dich[k] = v;
+  }
+  overrides.dichiarazione = dich;
+  return JSON.stringify(overrides);
+}
+
+/**
  * Carica scenario + profilo + year-settings e costruisce la dichiarazione.
  * Condiviso da GET e PATCH per garantire una risposta identica (DRY).
  */
-async function loadDichiarazioneResponse(db: Db, profileId: string, year: number) {
+async function loadDichiarazioneResponse(db: Db, profileId: string, year: number): Promise<DichiarazioneResponse> {
   const data = await loadScenarioData(db, profileId, year);
   if (!data) return { year, needsConfig: true as const };
 
@@ -122,26 +148,7 @@ dichiarazioneRoute.patch('/:year', zValidator('json', OverridesPatchInput), asyn
     .where(and(eq(yearSettings.profileId, profileId), eq(yearSettings.year, year))).limit(1);
   if (!row) throw new HttpError(404, 'YEAR_SETTINGS_NOT_FOUND', `Impostazioni anno ${year} non trovate`);
 
-  // parse difensivo dell'overrides JSON esistente (preserva gli override scadenziario)
-  let overrides: Record<string, unknown> = {};
-  if (row.overrides) {
-    try {
-      const parsed = JSON.parse(row.overrides) as unknown;
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) overrides = parsed as Record<string, unknown>;
-    } catch { overrides = {}; }
-  }
-  const dich: Record<string, unknown> = (overrides.dichiarazione && typeof overrides.dichiarazione === 'object' && !Array.isArray(overrides.dichiarazione))
-    ? (overrides.dichiarazione as Record<string, unknown>) : {};
-
-  for (const k of ['accontiVersati', 'creditiImposta', 'creditoAnnoPrec'] as const) {
-    if (!(k in patch)) continue;          // non fornito → invariato
-    const v = patch[k];
-    if (v === null) delete dich[k];        // null → torna al default
-    else dich[k] = v;
-  }
-  overrides.dichiarazione = dich;
-
-  await db.update(yearSettings).set({ overrides: JSON.stringify(overrides) })
+  await db.update(yearSettings).set({ overrides: mergeDichiarazioneOverrides(row.overrides, patch) })
     .where(and(eq(yearSettings.profileId, profileId), eq(yearSettings.year, year)));
 
   return c.json(await loadDichiarazioneResponse(db, profileId, year));

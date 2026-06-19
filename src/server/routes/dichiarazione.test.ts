@@ -136,7 +136,7 @@ test('PATCH su anno non configurato → 404', async () => {
   assert.equal(res.status, 404);
 });
 
-test('PATCH con valore negativo → 422', async () => {
+test('PATCH con valore negativo → 400', async () => {
   const { app, headers } = await makePatchApp();
   const res = await app.request('/api/dichiarazione/2025', { method: 'PATCH', headers, body: JSON.stringify({ creditiImposta: -5 }) });
   assert.equal(res.status, 400); // zValidator → 400
