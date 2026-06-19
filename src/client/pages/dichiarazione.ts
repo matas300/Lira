@@ -105,16 +105,16 @@ function lmSrc(d: Dichiarazione, key: string): string {
 }
 
 export function renderRettifiche(d: Dichiarazione): string {
-  const acc = lmVal(d, 'LM43');
-  const cred = lmVal(d, 'LM39');
-  const rx1 = lmVal(d, 'RX1');
+  const acc = lmVal(d, 'LM45');
+  const cred = lmVal(d, 'LM40');
+  const credPrec = lmVal(d, 'LM43');
   return `<div class="card dich-card dich-adj">
     <h3>Rettifiche manuali</h3>
-    <p class="dich-note">Imposta i valori solo se differiscono dal calcolo automatico. Lascia vuoto/azzera per usare il valore calcolato.</p>
+    <p class="dich-note">Imposta i valori solo se differiscono dal calcolo automatico. Lascia vuoto/azzera per usare il valore calcolato. Gli acconti versati di default sono stimati dai pagamenti registrati: verificali con gli F24 effettivi.</p>
     <div class="dich-adj-grid">
-      <label>Acconti versati (LM43)<input type="number" step="0.01" min="0" id="adj-acconti" value="${esc(acc)}" data-default="${esc(acc)}" data-overridden="${esc(lmSrc(d, 'LM43') === 'override')}"></label>
-      <label>Crediti d'imposta (LM39)<input type="number" step="0.01" min="0" id="adj-crediti" value="${esc(cred)}" data-default="${esc(cred)}" data-overridden="${esc(lmSrc(d, 'LM39') === 'override')}"></label>
-      <label>Credito anno precedente (RX1)<input type="number" step="0.01" min="0" id="adj-credprec" value="${esc(rx1)}" data-default="${esc(rx1)}" data-overridden="${esc(lmSrc(d, 'RX1') === 'override')}"></label>
+      <label>Acconti versati (LM45)<input type="number" step="1" min="0" id="adj-acconti" value="${esc(acc)}" data-default="${esc(acc)}" data-overridden="${esc(lmSrc(d, 'LM45') === 'override')}"></label>
+      <label>Crediti d'imposta (LM40)<input type="number" step="1" min="0" id="adj-crediti" value="${esc(cred)}" data-default="${esc(cred)}" data-overridden="${esc(lmSrc(d, 'LM40') === 'override')}"></label>
+      <label>Credito anno precedente (LM43)<input type="number" step="1" min="0" id="adj-credprec" value="${esc(credPrec)}" data-default="${esc(credPrec)}" data-overridden="${esc(lmSrc(d, 'LM43') === 'override')}"></label>
     </div>
     <div class="dich-adj-actions">
       <button class="btn btn-primary" type="button" id="adj-save">Salva rettifiche</button>

@@ -103,59 +103,75 @@ export interface DichiarazioneOverridesApplied {
   overridden: { accontiVersati: boolean; creditiImposta: boolean; creditoAnnoPrec: boolean };
 }
 
-// r2: rete di sicurezza a 2 decimali. NON usa ceil2 come il tax-engine perché
-// questo layer NON arrotonda fiscalmente — i valori autoritativi arrivano già
-// ceil2 dallo scenario; qui si mappa soltanto.
+// r2: rete di sicurezza a 2 decimali (usata da quadro RR / righe INPS F24, che
+// NON sono arrotondate all'euro). r0: arrotondamento all'unità di euro come da
+// istruzioni AdE per i righi del modello (imposta sostitutiva, quadro LM/RX).
 function r2(n: number): number {
   return Math.round((Number(n) || 0) * 100) / 100;
+}
+function r0(n: number): number {
+  return Math.round(Number(n) || 0);
 }
 function rigo(key: string, label: string, value: number, source: RigoSource = 'computed'): Rigo {
   return { key, label, value: r2(value), source };
 }
+/** Rigo del modello, arrotondato all'unità di euro (LM/RX). */
+function rigoEur(key: string, label: string, value: number, source: RigoSource = 'computed'): Rigo {
+  return { key, label, value: r0(value), source };
+}
 
 /** Override ammesso solo se numero finito ≥ 0; altrimenti si usa il default calcolato. */
 function pickOverride(v: number | null | undefined, fallback: number): { value: number; overridden: boolean } {
-  if (typeof v === 'number' && Number.isFinite(v) && v >= 0) return { value: r2(v), overridden: true };
-  return { value: r2(fallback), overridden: false };
+  if (typeof v === 'number' && Number.isFinite(v) && v >= 0) return { value: r0(v), overridden: true };
+  return { value: r0(fallback), overridden: false };
 }
 
 /**
  * Applica le rettifiche manuali (6C) a valle dello scenario. Default = valori
  * calcolati di 6A → invariante di non-regressione. Imposta NON è override-abile.
+ * Tutte le grandezze sono arrotondate all'unità di euro (modello Redditi PF, #3).
  */
 export function applyDichiarazioneOverrides(
   s: ForfettarioScenario, ov: DichiarazioneOverridesInput,
 ): DichiarazioneOverridesApplied {
-  const imposta = r2(s.substituteTax);
-  const accDefault = Math.max(0, r2(s.substituteTax - s.taxSaldo)); // acconti imputati (6A)
+  const imposta = r0(s.substituteTax);
+  const accDefault = Math.max(0, r0(s.substituteTax - s.taxSaldo)); // acconti imputati (6A)
   const acc = pickOverride(ov.accontiVersati, accDefault);
   const cred = pickOverride(ov.creditiImposta, 0);
   const credPrev = pickOverride(ov.creditoAnnoPrec, 0);
-  const detrazioni = r2(acc.value + cred.value + credPrev.value);
+  const detrazioni = acc.value + cred.value + credPrev.value; // già in euro interi
   return {
     imposta,
     accontiVersati: acc.value,
     creditiImposta: cred.value,
     creditoAnnoPrec: credPrev.value,
-    saldoEffettivo: Math.max(0, r2(imposta - detrazioni)),
-    creditoDaRiportare: Math.max(0, r2(detrazioni - imposta)),
+    saldoEffettivo: Math.max(0, imposta - detrazioni),
+    creditoDaRiportare: Math.max(0, detrazioni - imposta),
     overridden: { accontiVersati: acc.overridden, creditiImposta: cred.overridden, creditoAnnoPrec: credPrev.overridden },
   };
 }
 
-/** Quadro LM (forfettario): reddito + imposta + rettifiche 6C (LM39/LM43/LM45). */
+/**
+ * Quadro LM Sez. III (forfettario), numerazione fedele al modello Redditi PF:
+ * LM22 componenti positivi, LM34 reddito lordo, LM35 contributi, LM36 reddito
+ * netto, LM38 imponibile, LM39 imposta, LM40 crediti, LM41 ritenute (=0 art.1
+ * c.67), LM43 eccedenza dich. precedente, LM45 acconti, LM46 debito, LM47 credito.
+ */
 export function buildQuadroLM(s: ForfettarioScenario, a: DichiarazioneOverridesApplied): Rigo[] {
-  const lm4 = Math.max(0, s.forfettarioGrossIncome - s.deductibleContributionsPaid);
+  const redditoNetto = Math.max(0, s.forfettarioGrossIncome - s.deductibleContributionsPaid);
   return [
-    rigo('LM1', 'Ricavi/compensi percepiti', s.grossCollected),
-    rigo('LM2', 'Reddito forfettario lordo (ricavi × coefficiente)', s.forfettarioGrossIncome),
-    rigo('LM3', 'Contributi previdenziali deducibili (cassa)', s.deductibleContributionsPaid),
-    rigo('LM4', 'Reddito al netto dei contributi', lm4),
-    rigo('LM34', 'Reddito imponibile', s.taxableBase),
-    rigo('LM36', 'Imposta sostitutiva', a.imposta),
-    rigo('LM39', 'Crediti d\'imposta', a.creditiImposta, a.overridden.creditiImposta ? 'override' : 'zero'),
-    rigo('LM43', 'Acconti versati', a.accontiVersati, a.overridden.accontiVersati ? 'override' : 'computed'),
-    rigo('LM45', 'Imposta sostitutiva a debito (saldo)', a.saldoEffettivo),
+    rigoEur('LM22', 'Componenti positivi (ricavi/compensi percepiti)', s.grossCollected),
+    rigoEur('LM34', 'Reddito lordo (ricavi × coefficiente)', s.forfettarioGrossIncome),
+    rigoEur('LM35', 'Contributi previdenziali e assistenziali deducibili', s.deductibleContributionsPaid),
+    rigoEur('LM36', 'Reddito netto', redditoNetto),
+    rigoEur('LM38', 'Reddito al netto delle perdite (imponibile)', s.taxableBase),
+    rigoEur('LM39', 'Imposta sostitutiva', a.imposta),
+    rigoEur('LM40', 'Crediti d\'imposta', a.creditiImposta, a.overridden.creditiImposta ? 'override' : 'zero'),
+    rigoEur('LM41', 'Ritenute (regime forfettario: art. 1 c. 67 L. 190/2014)', 0, 'zero'),
+    rigoEur('LM43', 'Eccedenza d\'imposta dalla dichiarazione precedente', a.creditoAnnoPrec, a.overridden.creditoAnnoPrec ? 'override' : 'zero'),
+    rigoEur('LM45', 'Acconti versati', a.accontiVersati, a.overridden.accontiVersati ? 'override' : 'computed'),
+    rigoEur('LM46', 'Imposta sostitutiva a debito (saldo)', a.saldoEffettivo),
+    rigoEur('LM47', 'Imposta sostitutiva a credito', a.creditoDaRiportare, a.creditoDaRiportare > 0 ? 'computed' : 'zero'),
   ];
 }
 
@@ -182,11 +198,16 @@ export function buildQuadroRR(s: ForfettarioScenario, inpsMode: string): QuadroR
   };
 }
 
-/** Quadro RX (compensazioni): RX1 credito anno precedente (6C), RX4 credito da riportare. */
+/**
+ * Quadro RX, rigo RX31 (imposta sostitutiva regime forfettario, riferito a LM):
+ * col.1 = imposta a debito (= LM46), col.5 = credito da riportare/compensare
+ * (= LM47). Il credito ANNO PRECEDENTE non sta qui: è in LM43 (eccedenza dich.
+ * precedente). Valori in euro interi.
+ */
 export function buildQuadroRX(a: DichiarazioneOverridesApplied): Rigo[] {
   return [
-    rigo('RX1', 'Credito da anno precedente', a.creditoAnnoPrec, a.overridden.creditoAnnoPrec ? 'override' : 'zero'),
-    rigo('RX4', 'Credito da riportare al periodo successivo', a.creditoDaRiportare, a.creditoDaRiportare > 0 ? 'computed' : 'zero'),
+    rigoEur('RX31', 'RX31 col.1 — Imposta sostitutiva a debito', a.saldoEffettivo, a.saldoEffettivo > 0 ? 'computed' : 'zero'),
+    rigoEur('RX31cred', 'RX31 col.5 — Credito da riportare/compensare', a.creditoDaRiportare, a.creditoDaRiportare > 0 ? 'computed' : 'zero'),
   ];
 }
 
@@ -340,6 +361,12 @@ export function buildDichiarazione(inp: DichiarazioneInput): Dichiarazione {
   const anyOverride = applied.overridden.accontiVersati || applied.overridden.creditiImposta || applied.overridden.creditoAnnoPrec;
   if (anyOverride) {
     warnings.push({ code: 'DICH_OVERRIDE_ATTIVO', severity: 'info', message: 'Rettifiche manuali attive: alcuni importi sono stati impostati manualmente e differiscono dal calcolo automatico.' });
+  }
+  // #4: gli acconti versati (LM45) di default sono STIMATI dai pagamenti tracciati,
+  // non dagli F24 effettivamente versati: invita a verificare per evitare di gonfiare
+  // (o sgonfiare) il saldo. Sopito dall'override manuale dell'acconto.
+  if (applied.accontiVersati > 0 && !applied.overridden.accontiVersati) {
+    warnings.push({ code: 'DICH_ACCONTI_STIMATI', severity: 'info', message: 'Acconti versati (LM45) stimati dai pagamenti registrati: verifica con gli F24 effettivamente versati e rettifica se necessario.' });
   }
   return {
     frontespizio: buildFrontespizio(inp),

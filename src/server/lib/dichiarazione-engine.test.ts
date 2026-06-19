@@ -31,24 +31,24 @@ function fakeScenario(over: Partial<ForfettarioScenario> = {}): ForfettarioScena
   };
 }
 
-test('buildQuadroLM: mappa i righi chiave dallo scenario', () => {
+test('buildQuadroLM: mappa i righi chiave dallo scenario (numerazione modello Redditi PF)', () => {
   const righi = buildQuadroLM(fakeScenario(), applyDichiarazioneOverrides(fakeScenario(), {}));
   const by = (k: string) => righi.find((r) => r.key === k)!;
-  assert.equal(by('LM1').value, 30000);    // ricavi
-  assert.equal(by('LM2').value, 20100);    // reddito lordo
-  assert.equal(by('LM3').value, 4000);     // contributi deducibili
-  assert.equal(by('LM4').value, 16100);    // netto
-  assert.equal(by('LM34').value, 16100);   // imponibile
-  assert.equal(by('LM36').value, 2415);    // imposta sostitutiva
-  assert.equal(by('LM43').value, 1000);    // acconti = substituteTax − taxSaldo
-  assert.equal(by('LM45').value, 1415);    // saldo a debito
-  assert.equal(by('LM1').source, 'computed');
+  assert.equal(by('LM22').value, 30000);   // componenti positivi (ricavi)
+  assert.equal(by('LM34').value, 20100);   // reddito lordo
+  assert.equal(by('LM35').value, 4000);    // contributi deducibili
+  assert.equal(by('LM36').value, 16100);   // reddito netto
+  assert.equal(by('LM38').value, 16100);   // imponibile (al netto perdite)
+  assert.equal(by('LM39').value, 2415);    // imposta sostitutiva
+  assert.equal(by('LM45').value, 1000);    // acconti versati = substituteTax − taxSaldo
+  assert.equal(by('LM46').value, 1415);    // imposta a debito (saldo)
+  assert.equal(by('LM22').source, 'computed');
 });
 
-test('buildQuadroLM: acconti (LM43) mai negativi', () => {
+test('buildQuadroLM: acconti (LM45) mai negativi', () => {
   const s = fakeScenario({ substituteTax: 500, taxSaldo: 500 });
   const righi = buildQuadroLM(s, applyDichiarazioneOverrides(s, {}));
-  assert.equal(righi.find((r) => r.key === 'LM43')!.value, 0);
+  assert.equal(righi.find((r) => r.key === 'LM45')!.value, 0);
 });
 
 test('buildQuadroRR: gestione separata → contributi dovuti dai variabili, niente fissi', () => {
@@ -67,49 +67,64 @@ test('buildQuadroRR: artigiani/commercianti → fissi + variabili + totale', () 
   assert.equal(q.righi.find((r) => r.key === 'RR_TOTALE')!.value, 5200);
 });
 
-test('buildQuadroRX: credito anno prec a 0 (6A), source zero', () => {
+test('buildQuadroRX: RX31 debito = saldo, credito da riportare 0 (6A), source coerente', () => {
   const righi = buildQuadroRX(applyDichiarazioneOverrides(fakeScenario(), {}));
-  assert.equal(righi.find((r) => r.key === 'RX1')!.value, 0);
-  assert.equal(righi.find((r) => r.key === 'RX1')!.source, 'zero');
+  const by = (k: string) => righi.find((r) => r.key === k)!;
+  assert.equal(by('RX31').value, 1415);          // col.1 imposta a debito (= saldo)
+  assert.equal(by('RX31').source, 'computed');
+  assert.equal(by('RX31cred').value, 0);         // col.5 credito da riportare
+  assert.equal(by('RX31cred').source, 'zero');
+});
+
+test('buildQuadroLM: credito anno prec → LM43 (eccedenza dich. precedente), default 0 source zero', () => {
+  const s = fakeScenario();
+  const righi = buildQuadroLM(s, applyDichiarazioneOverrides(s, {}));
+  const lm43 = righi.find((r) => r.key === 'LM43')!;
+  assert.equal(lm43.value, 0);
+  assert.equal(lm43.source, 'zero');
 });
 
 test('buildQuadroRS: vuoto in 6A (informativo, popolato in 6C)', () => {
   assert.deepEqual(buildQuadroRS(), []);
 });
 
-test('buildQuadroLM: include LM39 e usa saldoEffettivo per LM45', () => {
+test('buildQuadroLM: crediti d\'imposta (LM40) e acconti (LM45), saldo a debito LM46', () => {
   const s = fakeScenario();
   const a = applyDichiarazioneOverrides(s, { creditiImposta: 200, accontiVersati: 800 });
   const righi = buildQuadroLM(s, a);
   const by = (k: string) => righi.find((r) => r.key === k)!;
-  assert.equal(by('LM36').value, 2415);
-  assert.equal(by('LM39').value, 200);
-  assert.equal(by('LM39').source, 'override');
-  assert.equal(by('LM43').value, 800);
-  assert.equal(by('LM43').source, 'override');
-  assert.equal(by('LM45').value, 1415); // 2415 − 200 − 800
+  assert.equal(by('LM39').value, 2415);   // imposta sostitutiva
+  assert.equal(by('LM40').value, 200);
+  assert.equal(by('LM40').source, 'override');
+  assert.equal(by('LM45').value, 800);
+  assert.equal(by('LM45').source, 'override');
+  assert.equal(by('LM46').value, 1415); // 2415 − 200 − 800
 });
 
-test('buildQuadroLM: default → LM39 zero, LM43 computed (non override)', () => {
+test('buildQuadroLM: default → LM40 zero, LM41 zero, LM45 computed (non override)', () => {
   const s = fakeScenario();
   const righi = buildQuadroLM(s, applyDichiarazioneOverrides(s, {}));
   const by = (k: string) => righi.find((r) => r.key === k)!;
-  assert.equal(by('LM39').value, 0);
-  assert.equal(by('LM39').source, 'zero');
-  assert.equal(by('LM43').source, 'computed');
-  assert.equal(by('LM45').value, 1415);
+  assert.equal(by('LM40').value, 0);
+  assert.equal(by('LM40').source, 'zero');
+  assert.equal(by('LM41').value, 0);       // ritenute forfettario = 0
+  assert.equal(by('LM41').source, 'zero');
+  assert.equal(by('LM45').source, 'computed');
+  assert.equal(by('LM46').value, 1415);
 });
 
-test('buildQuadroRX: RX1 da override, RX4 = credito da riportare', () => {
+test('buildQuadro: credito anno prec (LM43) da override; eccedenza → RX31 col.5', () => {
   const s = fakeScenario();
   const a = applyDichiarazioneOverrides(s, { creditoAnnoPrec: 2000 });
-  const righi = buildQuadroRX(a);
-  const by = (k: string) => righi.find((r) => r.key === k)!;
-  assert.equal(by('RX1').value, 2000);
-  assert.equal(by('RX1').source, 'override');
-  // detrazioni = 1000(acc) + 2000 = 3000 > 2415 → RX4 = 585
-  assert.equal(by('RX4').value, 585);
-  assert.equal(by('RX4').source, 'computed');
+  const lm = buildQuadroLM(s, a);
+  const rx = buildQuadroRX(a);
+  const lm43 = lm.find((r) => r.key === 'LM43')!;
+  assert.equal(lm43.value, 2000);
+  assert.equal(lm43.source, 'override');
+  // detrazioni = 1000(acc) + 2000 = 3000 > 2415 → credito da riportare = 585
+  assert.equal(rx.find((r) => r.key === 'RX31cred')!.value, 585);
+  assert.equal(rx.find((r) => r.key === 'RX31cred')!.source, 'computed');
+  assert.equal(rx.find((r) => r.key === 'RX31')!.value, 0); // saldo a debito azzerato
 });
 
 const ysBase: DichiarazioneYsView = {
@@ -164,7 +179,7 @@ test('buildWarnings: RS informativo sempre info', () => {
 
 test('buildDichiarazione: assembla tutti i quadri', () => {
   const d = buildDichiarazione(input());
-  assert.equal(d.quadroLM.length, 9);
+  assert.equal(d.quadroLM.length, 12);
   assert.equal(d.quadroRR.sezione, 'artigiani_commercianti');
   assert.equal(d.quadroRX.length, 2);
   assert.equal(d.frontespizio.regime, 'RF19');
@@ -366,10 +381,10 @@ test('applyDichiarazioneOverrides: valori non validi (neg/NaN/null) → default,
   assert.equal(a.overridden.creditiImposta, false);
 });
 
-test('buildDichiarazione: override attivo → LM45 ridotto e warning DICH_OVERRIDE_ATTIVO', () => {
+test('buildDichiarazione: override attivo → LM46 ridotto e warning DICH_OVERRIDE_ATTIVO', () => {
   const d = buildDichiarazione(input({ overrides: { creditoAnnoPrec: 415 } }));
-  const lm45 = d.quadroLM.find((r) => r.key === 'LM45')!;
-  assert.equal(lm45.value, 1000); // 1415 − 415
+  const lm46 = d.quadroLM.find((r) => r.key === 'LM46')!;
+  assert.equal(lm46.value, 1000); // 1415 − 415
   assert.ok(d.warnings.some((w) => w.code === 'DICH_OVERRIDE_ATTIVO' && w.severity === 'info'));
   // coerenza F24
   assert.equal(d.f24[0]!.righe.find((r) => r.codice === '1792')!.importo, 1000);
@@ -377,18 +392,40 @@ test('buildDichiarazione: override attivo → LM45 ridotto e warning DICH_OVERRI
 
 test('buildDichiarazione: nessun override → niente warning DICH_OVERRIDE_ATTIVO, numeri 6A', () => {
   const d = buildDichiarazione(input());
-  assert.equal(d.quadroLM.find((r) => r.key === 'LM45')!.value, 1415);
+  assert.equal(d.quadroLM.find((r) => r.key === 'LM46')!.value, 1415);
   assert.ok(!d.warnings.some((w) => w.code === 'DICH_OVERRIDE_ATTIVO'));
 });
 
-test('GOLDEN 6C: override completo coerente su LM/RX/F24', () => {
-  const s = fakeScenario(); // imposta 2415, taxSaldo 1415
+test('buildDichiarazione: acconti default (non override) → warning DICH_ACCONTI_STIMATI', () => {
+  const d = buildDichiarazione(input()); // acconti default 1000 > 0, non overridden
+  assert.ok(d.warnings.some((w) => w.code === 'DICH_ACCONTI_STIMATI' && w.severity === 'info'));
+});
+
+test('buildDichiarazione: acconti override → nessun warning DICH_ACCONTI_STIMATI', () => {
+  const d = buildDichiarazione(input({ overrides: { accontiVersati: 1000 } }));
+  assert.ok(!d.warnings.some((w) => w.code === 'DICH_ACCONTI_STIMATI'));
+});
+
+test('GOLDEN: override completo coerente su LM/RX/F24 (numerazione modello)', () => {
   const d = buildDichiarazione(input({ overrides: { accontiVersati: 900, creditiImposta: 100, creditoAnnoPrec: 200 } }));
   // saldo = 2415 − 900 − 100 − 200 = 1215
-  assert.equal(d.quadroLM.find((r) => r.key === 'LM45')!.value, 1215);
-  assert.equal(d.quadroLM.find((r) => r.key === 'LM39')!.value, 100);
-  assert.equal(d.quadroLM.find((r) => r.key === 'LM43')!.value, 900);
-  assert.equal(d.quadroRX.find((r) => r.key === 'RX1')!.value, 200);
-  assert.equal(d.quadroRX.find((r) => r.key === 'RX4')!.value, 0);
+  assert.equal(d.quadroLM.find((r) => r.key === 'LM39')!.value, 2415); // imposta
+  assert.equal(d.quadroLM.find((r) => r.key === 'LM40')!.value, 100);  // crediti
+  assert.equal(d.quadroLM.find((r) => r.key === 'LM43')!.value, 200);  // eccedenza prec
+  assert.equal(d.quadroLM.find((r) => r.key === 'LM45')!.value, 900);  // acconti
+  assert.equal(d.quadroLM.find((r) => r.key === 'LM46')!.value, 1215); // saldo a debito
+  assert.equal(d.quadroLM.find((r) => r.key === 'LM47')!.value, 0);    // credito
+  assert.equal(d.quadroRX.find((r) => r.key === 'RX31')!.value, 1215); // RX31 col.1
+  assert.equal(d.quadroRX.find((r) => r.key === 'RX31cred')!.value, 0);
   assert.equal(d.f24[0]!.righe.find((r) => r.codice === '1792')!.importo, 1215);
+});
+
+test('#3 arrotondamento all\'euro: imposta/saldo/acconti su righi LM in euro interi', () => {
+  // substituteTax con centesimi → LM39 e LM46 arrotondati all'euro
+  const s = fakeScenario({ substituteTax: 2415.49, taxSaldo: 1415.49 });
+  const d = buildDichiarazione({ ...input(), scenario: s });
+  assert.equal(d.quadroLM.find((r) => r.key === 'LM39')!.value, 2415); // 2415.49 → 2415
+  assert.equal(d.quadroLM.find((r) => r.key === 'LM45')!.value, 1000); // 2415.49 − 1415.49 = 1000
+  assert.equal(d.quadroLM.find((r) => r.key === 'LM46')!.value, 1415); // 2415 − 1000
+  assert.equal(Number.isInteger(d.quadroLM.find((r) => r.key === 'LM39')!.value), true);
 });

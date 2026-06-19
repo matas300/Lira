@@ -115,9 +115,9 @@ test('PATCH /api/dichiarazione/:year salva override e li riflette nel GET', asyn
   assert.equal(patch.status, 200);
   const get = await app.request('/api/dichiarazione/2025', { headers });
   const body = await get.json();
-  const rx1 = body.dichiarazione.quadroRX.find((r: { key: string }) => r.key === 'RX1');
-  assert.equal(rx1.value, 100);
-  assert.equal(rx1.source, 'override');
+  const lm43 = body.dichiarazione.quadroLM.find((r: { key: string }) => r.key === 'LM43');
+  assert.equal(lm43.value, 100);
+  assert.equal(lm43.source, 'override');
 });
 
 test('PATCH con null rimuove l\'override (torna al default)', async () => {
@@ -126,8 +126,8 @@ test('PATCH con null rimuove l\'override (torna al default)', async () => {
   await app.request('/api/dichiarazione/2025', { method: 'PATCH', headers, body: JSON.stringify({ creditoAnnoPrec: null }) });
   const get = await app.request('/api/dichiarazione/2025', { headers });
   const body = await get.json();
-  assert.equal(body.dichiarazione.quadroRX.find((r: { key: string }) => r.key === 'RX1').value, 0);
-  assert.equal(body.dichiarazione.quadroRX.find((r: { key: string }) => r.key === 'RX1').source, 'zero');
+  assert.equal(body.dichiarazione.quadroLM.find((r: { key: string }) => r.key === 'LM43').value, 0);
+  assert.equal(body.dichiarazione.quadroLM.find((r: { key: string }) => r.key === 'LM43').source, 'zero');
 });
 
 test('PATCH su anno non configurato → 404', async () => {
@@ -184,6 +184,6 @@ test('PATCH dichiarazione con overrides JSON corrotto → 200 (parse difensivo, 
   // L'override è stato ricostruito da capo e applicato.
   const get = await app.request('/api/dichiarazione/2025', { headers });
   const body = await get.json();
-  const rx1 = body.dichiarazione.quadroRX.find((r: { key: string }) => r.key === 'RX1');
-  assert.equal(rx1.value, 100);
+  const lm43 = body.dichiarazione.quadroLM.find((r: { key: string }) => r.key === 'LM43');
+  assert.equal(lm43.value, 100);
 });
