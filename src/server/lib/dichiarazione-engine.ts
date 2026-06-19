@@ -15,7 +15,7 @@ import type { ForfettarioScenario } from './tax-engine';
 import { buildAccontoPlan, buildContributiAccontoPlan } from './tax-engine';
 import { buildRolledDueDate } from '@shared/date-rules';
 
-export type RigoSource = 'computed' | 'from-profile' | 'zero';
+export type RigoSource = 'computed' | 'from-profile' | 'zero' | 'override';
 export interface Rigo {
   key: string;
   label: string;
@@ -86,6 +86,21 @@ export interface DichiarazioneInput {
   ys: DichiarazioneYsView;
   anagrafica: DichiarazioneAnagrafica;
   dataInizioAttivita?: string;
+  overrides: DichiarazioneOverridesInput;
+}
+export interface DichiarazioneOverridesInput {
+  accontiVersati?: number | null;
+  creditiImposta?: number | null;
+  creditoAnnoPrec?: number | null;
+}
+export interface DichiarazioneOverridesApplied {
+  imposta: number;
+  accontiVersati: number;
+  creditiImposta: number;
+  creditoAnnoPrec: number;
+  saldoEffettivo: number;
+  creditoDaRiportare: number;
+  overridden: { accontiVersati: boolean; creditiImposta: boolean; creditoAnnoPrec: boolean };
 }
 
 // r2: rete di sicurezza a 2 decimali. NON usa ceil2 come il tax-engine perché
@@ -98,19 +113,49 @@ function rigo(key: string, label: string, value: number, source: RigoSource = 'c
   return { key, label, value: r2(value), source };
 }
 
-/** Quadro LM (forfettario): mappa reddito e imposta sostitutiva dallo scenario. */
-export function buildQuadroLM(s: ForfettarioScenario): Rigo[] {
+/** Override ammesso solo se numero finito ≥ 0; altrimenti si usa il default calcolato. */
+function pickOverride(v: number | null | undefined, fallback: number): { value: number; overridden: boolean } {
+  if (typeof v === 'number' && Number.isFinite(v) && v >= 0) return { value: r2(v), overridden: true };
+  return { value: r2(fallback), overridden: false };
+}
+
+/**
+ * Applica le rettifiche manuali (6C) a valle dello scenario. Default = valori
+ * calcolati di 6A → invariante di non-regressione. Imposta NON è override-abile.
+ */
+export function applyDichiarazioneOverrides(
+  s: ForfettarioScenario, ov: DichiarazioneOverridesInput,
+): DichiarazioneOverridesApplied {
+  const imposta = r2(s.substituteTax);
+  const accDefault = Math.max(0, r2(s.substituteTax - s.taxSaldo)); // acconti imputati (6A)
+  const acc = pickOverride(ov.accontiVersati, accDefault);
+  const cred = pickOverride(ov.creditiImposta, 0);
+  const credPrev = pickOverride(ov.creditoAnnoPrec, 0);
+  const detrazioni = r2(acc.value + cred.value + credPrev.value);
+  return {
+    imposta,
+    accontiVersati: acc.value,
+    creditiImposta: cred.value,
+    creditoAnnoPrec: credPrev.value,
+    saldoEffettivo: Math.max(0, r2(imposta - detrazioni)),
+    creditoDaRiportare: Math.max(0, r2(detrazioni - imposta)),
+    overridden: { accontiVersati: acc.overridden, creditiImposta: cred.overridden, creditoAnnoPrec: credPrev.overridden },
+  };
+}
+
+/** Quadro LM (forfettario): reddito + imposta + rettifiche 6C (LM39/LM43/LM45). */
+export function buildQuadroLM(s: ForfettarioScenario, a: DichiarazioneOverridesApplied): Rigo[] {
   const lm4 = Math.max(0, s.forfettarioGrossIncome - s.deductibleContributionsPaid);
-  const accontiImputati = Math.max(0, s.substituteTax - s.taxSaldo);
   return [
     rigo('LM1', 'Ricavi/compensi percepiti', s.grossCollected),
     rigo('LM2', 'Reddito forfettario lordo (ricavi × coefficiente)', s.forfettarioGrossIncome),
     rigo('LM3', 'Contributi previdenziali deducibili (cassa)', s.deductibleContributionsPaid),
     rigo('LM4', 'Reddito al netto dei contributi', lm4),
     rigo('LM34', 'Reddito imponibile', s.taxableBase),
-    rigo('LM36', 'Imposta sostitutiva', s.substituteTax),
-    rigo('LM43', 'Acconti versati', accontiImputati),
-    rigo('LM45', 'Imposta sostitutiva a debito (saldo)', s.taxSaldo),
+    rigo('LM36', 'Imposta sostitutiva', a.imposta),
+    rigo('LM39', 'Crediti d\'imposta', a.creditiImposta, a.overridden.creditiImposta ? 'override' : 'zero'),
+    rigo('LM43', 'Acconti versati', a.accontiVersati, a.overridden.accontiVersati ? 'override' : 'computed'),
+    rigo('LM45', 'Imposta sostitutiva a debito (saldo)', a.saldoEffettivo),
   ];
 }
 
@@ -137,11 +182,11 @@ export function buildQuadroRR(s: ForfettarioScenario, inpsMode: string): QuadroR
   };
 }
 
-/** Quadro RX (compensazioni): in 6A nessun credito da anno precedente (→ 6C). */
-export function buildQuadroRX(): Rigo[] {
+/** Quadro RX (compensazioni): RX1 credito anno precedente (6C), RX4 credito da riportare. */
+export function buildQuadroRX(a: DichiarazioneOverridesApplied): Rigo[] {
   return [
-    rigo('RX1', 'Credito da anno precedente', 0, 'zero'),
-    rigo('RX4', 'Credito da riportare al periodo successivo', 0, 'zero'),
+    rigo('RX1', 'Credito da anno precedente', a.creditoAnnoPrec, a.overridden.creditoAnnoPrec ? 'override' : 'zero'),
+    rigo('RX4', 'Credito da riportare al periodo successivo', a.creditoDaRiportare, a.creditoDaRiportare > 0 ? 'computed' : 'zero'),
   ];
 }
 
@@ -227,9 +272,12 @@ function resolveGiugno(year: number, prorogaSaldoAt: string | null): ResolvedDue
  * Acconti N+1 RICALCOLATI sulla base imposta(N)/contributi(N). Righe a 0 omesse;
  * moduli senza righe non emessi.
  */
-export function buildF24(s: ForfettarioScenario, ys: DichiarazioneYsView, year: number): F24Modulo[] {
+export function buildF24(s: ForfettarioScenario, ys: DichiarazioneYsView, year: number, a: DichiarazioneOverridesApplied): F24Modulo[] {
   if (ys.regime !== 'forfettario') return [];
 
+  // Gli acconti su N+1 si basano volutamente sull'imposta grezza dello scenario (s.substituteTax),
+  // NON su a.saldoEffettivo: gli override 6C toccano solo il saldo dell'anno corrente (tributo 1792),
+  // mai la base di ricalcolo degli acconti.
   const taxAcc = buildAccontoPlan(s.substituteTax);
   const gestione = ys.inpsMode === 'gestione_separata' ? 'gestione_separata' : 'artigiani_commercianti';
   const inpsAcc = buildContributiAccontoPlan(s.contributiVariabiliDovuti, gestione);
@@ -241,7 +289,7 @@ export function buildF24(s: ForfettarioScenario, ys: DichiarazioneYsView, year: 
   const novembre = buildRolledDueDate(novembreBase);
 
   const righeGiugno = [
-    f24Riga('erario', F24_ERARIO.saldo, 'Imposta sostitutiva — saldo', year, s.taxSaldo),
+    f24Riga('erario', F24_ERARIO.saldo, 'Imposta sostitutiva — saldo', year, a.saldoEffettivo),
     f24Riga('erario', F24_ERARIO.acc1, 'Imposta sostitutiva — acconto 1ª rata', year + 1, taxAcc.first),
     f24Riga('inps', causale, 'Contributi INPS variabili — saldo', year, s.contributionSaldo),
     f24Riga('inps', causale, 'Contributi INPS variabili — acconto 1ª rata', year + 1, inpsAcc.first),
@@ -286,14 +334,20 @@ export function buildF24Warnings(
 
 /** Assembla la dichiarazione completa dai dati dell'anno. */
 export function buildDichiarazione(inp: DichiarazioneInput): Dichiarazione {
-  const f24 = buildF24(inp.scenario, inp.ys, inp.year);
+  const applied = applyDichiarazioneOverrides(inp.scenario, inp.overrides);
+  const f24 = buildF24(inp.scenario, inp.ys, inp.year, applied);
+  const warnings: DichiarazioneWarning[] = [...buildWarnings(inp), ...buildF24Warnings(f24, inp.scenario, inp.ys)];
+  const anyOverride = applied.overridden.accontiVersati || applied.overridden.creditiImposta || applied.overridden.creditoAnnoPrec;
+  if (anyOverride) {
+    warnings.push({ code: 'DICH_OVERRIDE_ATTIVO', severity: 'info', message: 'Rettifiche manuali attive: alcuni importi sono stati impostati manualmente e differiscono dal calcolo automatico.' });
+  }
   return {
     frontespizio: buildFrontespizio(inp),
-    quadroLM: buildQuadroLM(inp.scenario),
+    quadroLM: buildQuadroLM(inp.scenario, applied),
     quadroRR: buildQuadroRR(inp.scenario, inp.ys.inpsMode),
-    quadroRX: buildQuadroRX(),
+    quadroRX: buildQuadroRX(applied),
     quadroRS: buildQuadroRS(),
     f24,
-    warnings: [...buildWarnings(inp), ...buildF24Warnings(f24, inp.scenario, inp.ys)],
+    warnings,
   };
 }

@@ -142,3 +142,8 @@
 .dich-f24-sez h4 { margin: 0 0 4px; font-size: .78rem; color: var(--text2); text-transform: uppercase; letter-spacing: .04em; }
 .dich-f24-tot { margin-top: 6px; border-top: 2px solid var(--color-border); font-weight: 700; }
 .dich-f24-tot .dich-row-k { color: var(--text); font-weight: 700; }
+.dich-adj-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 8px 0; }
+.dich-adj-grid label { display: flex; flex-direction: column; gap: 4px; font-size: .78rem; color: var(--text2); }
+.dich-adj-grid input { padding: 6px 8px; border: 1px solid var(--color-border); border-radius: 6px; background: var(--bg2, transparent); color: var(--text); }
+.dich-adj-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dich-src-ovr { border-color: var(--accent, #4caf50); color: var(--accent, #4caf50); }
