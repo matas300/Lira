@@ -19,7 +19,8 @@ import { type AuthEnv } from '../middleware/auth';
 import { scadenziarioRoute } from './scadenziario';
 import { yearSettings, profiles } from '../db/schema';
 
-async function setup() {
+async function setup(opts: { seed?: boolean } = {}) {
+  const seed = opts.seed !== false;
   const { db } = await createTestDb();
   const { userId, profileId } = await createUserWithDefaultProfile({
     db,
@@ -33,34 +34,36 @@ async function setup() {
       attivita: JSON.stringify({ data_inizio_attivita: '2018-04-01' }),
     } as Partial<typeof profiles.$inferInsert>)
     .where(eq(profiles.id, profileId));
-  await db.insert(yearSettings).values({
-    profileId,
-    year: 2025,
-    regime: 'forfettario',
-    coefficiente: 0.67,
-    impostaSostitutiva: 0.15,
-    inpsMode: 'artigiani_commercianti',
-    inpsCategoria: 'artigiano',
-    riduzione35: 0,
-    riduzione35Comunicata: 0,
-    haRedditoDipendente: 0,
-    limiteForfettario: 85000,
-    scadenziarioMetodo: 'storico',
-  } as typeof yearSettings.$inferInsert);
-  await db.insert(yearSettings).values({
-    profileId,
-    year: 2026,
-    regime: 'forfettario',
-    coefficiente: 0.67,
-    impostaSostitutiva: 0.15,
-    inpsMode: 'artigiani_commercianti',
-    inpsCategoria: 'artigiano',
-    riduzione35: 0,
-    riduzione35Comunicata: 0,
-    haRedditoDipendente: 0,
-    limiteForfettario: 85000,
-    scadenziarioMetodo: 'storico',
-  } as typeof yearSettings.$inferInsert);
+  if (seed) {
+    await db.insert(yearSettings).values({
+      profileId,
+      year: 2025,
+      regime: 'forfettario',
+      coefficiente: 0.67,
+      impostaSostitutiva: 0.15,
+      inpsMode: 'artigiani_commercianti',
+      inpsCategoria: 'artigiano',
+      riduzione35: 0,
+      riduzione35Comunicata: 0,
+      haRedditoDipendente: 0,
+      limiteForfettario: 85000,
+      scadenziarioMetodo: 'storico',
+    } as typeof yearSettings.$inferInsert);
+    await db.insert(yearSettings).values({
+      profileId,
+      year: 2026,
+      regime: 'forfettario',
+      coefficiente: 0.67,
+      impostaSostitutiva: 0.15,
+      inpsMode: 'artigiani_commercianti',
+      inpsCategoria: 'artigiano',
+      riduzione35: 0,
+      riduzione35Comunicata: 0,
+      haRedditoDipendente: 0,
+      limiteForfettario: 85000,
+      scadenziarioMetodo: 'storico',
+    } as typeof yearSettings.$inferInsert);
+  }
   const session = await createSession(db, userId, profileId);
   const app = new Hono<AuthEnv>();
   app.use('*', async (c, next) => {
@@ -89,10 +92,24 @@ test('GET include methodComparison + warnings + rulesRef', async () => {
   assert.match(body.rulesRef, /\/api\/tax\/rules\?year=2026/);
 });
 
-test('GET 2030 senza year_settings → 404', async () => {
+test('GET 2030 senza riga propria ma profilo configurato → 200 (stima ereditata)', async () => {
   const { app, headers } = await setup();
   const r = await app.request('/api/scadenziario/2030', { headers });
+  assert.equal(r.status, 200);
+  const body = await r.json();
+  assert.equal(body.rows.length, 14);
+  assert.ok(
+    body.warnings.some((w: { code: string }) => w.code === 'YEAR_SETTINGS_INHERITED'),
+    'warning parametri stimati presente',
+  );
+});
+
+test('GET con profilo senza ALCUNA year_settings → 404', async () => {
+  const { app, headers } = await setup({ seed: false });
+  const r = await app.request('/api/scadenziario/2026', { headers });
   assert.equal(r.status, 404);
+  const body = await r.json();
+  assert.equal(body.error.code, 'YEAR_SETTINGS_NOT_FOUND');
 });
 
 test('GET senza auth → 401', async () => {

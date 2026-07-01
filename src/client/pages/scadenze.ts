@@ -232,7 +232,8 @@ export function renderWarnings(warnings: AuditWarning[]): string {
 export function renderNeedsConfig(year: number): string {
   return `<div class="card scad-needsconfig">
     <h2>Scadenze ${esc(year)}</h2>
-    <p class="scad-note">Non ci sono ancora impostazioni fiscali per il ${esc(year)}: configura il regime e i parametri INPS per visualizzare il calendario scadenze.</p>
+    <p class="scad-note">Per calcolare il calendario delle scadenze (imposta sostitutiva, INPS, bollo) servono i parametri fiscali dell'anno: regime, coefficiente ATECO e cassa INPS.</p>
+    <p class="scad-note">Configuralo una volta: gli anni successivi erediteranno questi parametri come stima finché non li confermi.</p>
     <a class="btn btn-primary" href="/tasse" data-route="/tasse">Configura il ${esc(year)}</a>
   </div>`;
 }

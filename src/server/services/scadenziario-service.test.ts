@@ -100,10 +100,30 @@ test('warnings includono audit checks runtime (M1) quando riduzione_35 non comun
   assert.ok(view.warnings.some((w) => w.code === 'M1_RIDUZIONE_35_NON_COMUNICATA'));
 });
 
-test('GET anno senza year_settings → throw YEAR_SETTINGS_NOT_FOUND', async () => {
-  const { db, profileId } = await setup();
+test("anno senza year_settings ma profilo configurato → eredita l'ultimo anno (stima)", async () => {
+  const { db, profileId } = await setup(); // ha 2025 e 2026
+  const view = await buildScadenziarioView({ db, profileId, year: 2030 });
+  assert.equal(view.rows.length, 14, 'scadenziario popolato con parametri ereditati');
+  const inh = view.warnings.find((w) => w.code === 'YEAR_SETTINGS_INHERITED');
+  assert.ok(inh, 'warning YEAR_SETTINGS_INHERITED presente');
+  assert.equal(inh.severity, 'info');
+  assert.equal(
+    (inh.context as { fromYear?: number }).fromYear,
+    2026,
+    'eredita dal 2026 (anno salvato più recente ≤ 2030)',
+  );
+});
+
+test('profilo senza ALCUNA year_settings → throw YEAR_SETTINGS_NOT_FOUND', async () => {
+  const { db } = await createTestDb();
+  const u = await createUserWithDefaultProfile({
+    db,
+    email: 'nuovo@b.it',
+    password: 'pwd-lunga-12345',
+    name: 'Nuovo',
+  });
   await assert.rejects(
-    () => buildScadenziarioView({ db, profileId, year: 2030 }),
+    () => buildScadenziarioView({ db, profileId: u.profileId, year: 2026 }),
     /YEAR_SETTINGS_NOT_FOUND/,
   );
 });

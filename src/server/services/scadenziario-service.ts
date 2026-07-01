@@ -100,6 +100,52 @@ async function fetchYearSettings(
 }
 
 /**
+ * Cerca la year_settings da cui ereditare quando l'anno richiesto non ha una
+ * riga propria: preferisce l'anno salvato più recente ≤ `year`; se nessuno lo
+ * precede, ripiega sul più antico disponibile. Ritorna `null` solo se il
+ * profilo non ha ALCUNA year_settings (mai configurato).
+ */
+async function fetchInheritableYearSettings(
+  db: Db,
+  profileId: string,
+  year: number,
+): Promise<YearSettingsRow | null> {
+  const rows = await db
+    .select()
+    .from(yearSettings)
+    .where(eq(yearSettings.profileId, profileId));
+  if (rows.length === 0) return null;
+  const atOrBefore = rows.filter((r) => r.year <= year).sort((a, b) => b.year - a.year);
+  if (atOrBefore[0]) return atOrBefore[0];
+  return rows.slice().sort((a, b) => a.year - b.year)[0] ?? null;
+}
+
+/**
+ * Deriva una year_settings "stimata" per `year` da una riga sorgente di un
+ * altro anno: eredita l'identità fiscale (regime, coefficiente, imposta, INPS,
+ * riduzione 35%, redditi misti, limite, metodo) e AZZERA i campi one-off legati
+ * all'anno di origine — override manuali, proroga saldo, stato comunicazione
+ * riduzione 35%, carry-in "primo anno", base mese budget — che non ha senso
+ * propagare a un anno solo stimato. Row in-memory: non viene mai persistita.
+ */
+function deriveInheritedYearSettings(base: YearSettingsRow, year: number): YearSettingsRow {
+  return {
+    ...base,
+    year,
+    overrides: null,
+    prorogaSaldoAt: null,
+    riduzione35Comunicata: 0,
+    riduzione35DataComunicazione: null,
+    primoAnnoFatturatoPrec: null,
+    primoAnnoImpostaPrec: null,
+    primoAnnoAccontiImpostaPrec: null,
+    primoAnnoContribVariabiliPrec: null,
+    primoAnnoAccontiContribPrec: null,
+    budgetBaseMonth: null,
+  };
+}
+
+/**
  * Calcola il fatturato lordo dell'anno usato per le simulazioni fiscali.
  * Priorità:
  * 1. Somma `fatture.importo - ritenuta` con `pag_anno = year` (escluse le
@@ -354,15 +400,28 @@ export async function buildScadenziarioView(
   const today = args.today ?? new Date().toISOString().slice(0, 10);
 
   // 1. year_settings — N e N-1 (quest'ultimo opzionale per il primo anno).
-  const ys = await fetchYearSettings(db, profileId, year);
+  //
+  // Carry-forward (parità con CalcoliVari): se l'anno N non ha una riga propria
+  // ma il profilo ne ha almeno una in un ALTRO anno, ereditiamo l'identità
+  // fiscale dall'anno salvato più vicino (≤ N, altrimenti il più antico) e la
+  // marchiamo come STIMA (warning YEAR_SETTINGS_INHERITED). Il 404 resta solo
+  // per profili senza ALCUNA year_settings (mai configurati).
+  let ys = await fetchYearSettings(db, profileId, year);
+  let inheritedFromYear: number | null = null;
   if (!ys) {
-    // Il code è incluso nel messaggio: `assert.rejects` (e i log applicativi)
-    // matchano `YEAR_SETTINGS_NOT_FOUND` direttamente nel `Error.toString()`.
-    throw new HttpError(
-      404,
-      'YEAR_SETTINGS_NOT_FOUND',
-      `YEAR_SETTINGS_NOT_FOUND: year_settings non trovata per profile=${profileId} year=${year}`,
-    );
+    const base = await fetchInheritableYearSettings(db, profileId, year);
+    if (!base) {
+      // Nessuna year_settings per nessun anno → profilo non configurato.
+      // Il code è incluso nel messaggio: `assert.rejects` (e i log applicativi)
+      // matchano `YEAR_SETTINGS_NOT_FOUND` direttamente nel `Error.toString()`.
+      throw new HttpError(
+        404,
+        'YEAR_SETTINGS_NOT_FOUND',
+        `YEAR_SETTINGS_NOT_FOUND: year_settings non trovata per profile=${profileId} year=${year}`,
+      );
+    }
+    ys = deriveInheritedYearSettings(base, year);
+    inheritedFromYear = base.year;
   }
   const ysPrev = await fetchYearSettings(db, profileId, year - 1);
 
@@ -515,6 +574,22 @@ export async function buildScadenziarioView(
   });
 
   const warnings: AuditWarning[] = [...scadOut.warnings, ...auditWarnings];
+
+  // Banner "parametri stimati": lo scadenziario usa una year_settings ereditata
+  // da un altro anno (vedi carry-forward al punto 1). In testa così è il primo
+  // avviso che l'utente legge.
+  if (inheritedFromYear !== null) {
+    warnings.unshift({
+      code: 'YEAR_SETTINGS_INHERITED',
+      severity: 'info',
+      title: 'Parametri fiscali stimati',
+      message:
+        `Non hai ancora configurato i parametri fiscali del ${year}: lo scadenziario ` +
+        `usa quelli del ${inheritedFromYear} come stima. Configura il ${year} ` +
+        `(regime, coefficiente, INPS) per confermare gli importi.`,
+      context: { fromYear: inheritedFromYear, year },
+    });
+  }
 
   return {
     ...scadOut,
