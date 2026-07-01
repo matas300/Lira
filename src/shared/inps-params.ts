@@ -11,8 +11,10 @@
 //   cassa, 24% con altra cassa/pensionato.
 //
 // Fonti dei valori (porting da CalcoliVari/app.js, righe 382-451):
-// - Artigiani/Commercianti: Circolare INPS 33/2024 (anno 2024), 38/2025 (2025).
-// - Gestione Separata aliquote: Circolare INPS 24/2024, 26/2025.
+// - Artigiani/Commercianti: Circolare INPS 33/2024 (anno 2024), 38/2025 (2025),
+//   14/2026 (2026, del 9/02/2026).
+// - Gestione Separata aliquote: Circolare INPS 24/2024, 26/2025, 8/2026
+//   (del 3/02/2026).
 // - Gestione Separata massimale (= massimale L. 335/95 art. 2 c. 18):
 //   Circolari annuali INPS.
 //
@@ -79,6 +81,21 @@ export const INPS_ARTCOM: Readonly<Record<number, Readonly<InpsArtComParams>>> =
     aliquotaCommercianteOltreFascia: 0.2548,
     massimale: 120607,
   }),
+  2026: Object.freeze({
+    minimaleAnnuo: 18808,
+    // quota fissa = minimale * aliquota + 7,44 (maternità). Valori pubblicati
+    // in Circolare INPS 14/2026: artigiano 4.521,36 · commerciante 4.611,64.
+    quotaFissaAnnuaArtigiano: 4521.36,
+    quotaFissaAnnuaCommerciante: 4611.64,
+    aliquotaArtigiano: 0.24,
+    aliquotaCommerciante: 0.2448,
+    // Circolare INPS 14/2026: prima fascia (oltre cui +1 p.p.) 56.224 €.
+    fasciaRedditoAliquotaMaggiorata: 56224,
+    aliquotaArtigianoOltreFascia: 0.25,
+    aliquotaCommercianteOltreFascia: 0.2548,
+    // Massimale iscritti post-1996 (L. 335/95): 122.295 €.
+    massimale: 122295,
+  }),
 });
 
 export const INPS_GS: Readonly<Record<number, Readonly<InpsGsParams>>> = Object.freeze({
@@ -91,6 +108,13 @@ export const INPS_GS: Readonly<Record<number, Readonly<InpsGsParams>>> = Object.
     aliquotaSenzaAltraCassa: 0.2607,
     aliquotaConAltraCassa: 0.24,
     massimale: 120607,
+  }),
+  2026: Object.freeze({
+    // Circolare INPS 8/2026: 26,07% (25% IVS + 0,72% + 0,35% ISCRO) senza
+    // altra cassa; 24% con altra cassa/pensionato. Massimale 122.295 €.
+    aliquotaSenzaAltraCassa: 0.2607,
+    aliquotaConAltraCassa: 0.24,
+    massimale: 122295,
   }),
 });
 

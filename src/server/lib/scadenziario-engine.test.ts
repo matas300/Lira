@@ -205,10 +205,18 @@ test('inpsMode=gestione_separata → rate fisse a 0 (no minimale in GS)', () => 
   }
 });
 
-test('year non supportato da INPS_ARTCOM (es. 2026) → rate fisse 0 senza throw', () => {
-  // 2026 non è in INPS_ARTCOM → getInpsArtComForYear throws. L'engine deve catchare e usare 0.
-  const out = buildScadenziario(baseInput({ year: 2026 }));
-  const fissi1 = out.rows.find((r) => r.id === 'inps_fissi_1_2026');
+test('year non supportato da INPS_ARTCOM (es. 2030) → rate fisse 0 senza throw', () => {
+  // 2030 non è in INPS_ARTCOM → getInpsArtComForYear throws. L'engine deve catchare e usare 0.
+  const out = buildScadenziario(
+    baseInput({
+      year: 2030,
+      scenarios: {
+        historical: makeScenario({ year: 2030 }),
+        previsionale: makeScenario({ year: 2030, method: 'previsionale' }),
+      },
+    }),
+  );
+  const fissi1 = out.rows.find((r) => r.id === 'inps_fissi_1_2030');
   assert.ok(fissi1);
   assert.equal(fissi1!.amount.point, 0);
 });
