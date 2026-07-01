@@ -232,6 +232,19 @@ body.sidebar-collapsed .sb-item {
 }
 body.sidebar-collapsed .sb-ico { margin: 0; }
 body.sidebar-collapsed .sb-footer { justify-content: center; }
+/* Collassata: impila il footer in colonna così il pulsante di collasso resta
+   dentro la rail da 60px e resta cliccabile (fix: sidebar non si riapriva). */
+body.sidebar-collapsed .sb-footer-row {
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+body.sidebar-collapsed .sb-profile {
+  flex: none;
+  width: 100%;
+  justify-content: center;
+  padding: 6px 0;
+}
 /* Tooltip on hover (title attribute does the rest) */
 body.sidebar-collapsed .sb-item { position: relative; }
 body.sidebar-collapsed .sb-item:hover::after {
@@ -506,8 +519,9 @@ body.sidebar-collapsed .sb-top { flex-direction: column; }
   font-weight: 600;
 }
 
-/* Pannelli che occupano l'intera larghezza della griglia. */
-.regime-donut-panel,
+/* Pannelli che occupano l'intera larghezza della griglia. Il donut NON è più
+   full-width: si affianca a "In sintesi" sulla prima riga, eliminando la cella
+   vuota (il "buco") che restava a fianco della sintesi. */
 .regime-warn-panel,
 .regime-grid > .regime-limit,
 .regime-grid > .regime-panel:last-child {
@@ -616,19 +630,20 @@ body.sidebar-collapsed .sb-top { flex-direction: column; }
   text-transform: uppercase;
   letter-spacing: .04em;
   font-weight: 600;
+  text-align: center;
 }
 .monthly-row {
   border-top: 1px solid var(--color-border);
   font-size: .9rem;
 }
 .monthly-row:nth-child(even) { background: rgba(255,255,255,.015); }
-.monthly-row .monthly-mese { font-weight: 600; }
+.monthly-row .monthly-mese { font-weight: 600; text-align: center; }
 .monthly-row .monthly-lordo,
 .monthly-row .monthly-netto,
-.monthly-row .monthly-tasse { text-align: right; font-variant-numeric: tabular-nums; }
+.monthly-row .monthly-tasse { text-align: center; font-variant-numeric: tabular-nums; }
 .monthly-row .monthly-netto { color: var(--color-success); }
 .monthly-row .monthly-tasse { color: var(--color-tertiary); }
-.monthly-row .monthly-fonte { color: var(--color-text-muted); font-size: .8rem; text-align: right; }
+.monthly-row .monthly-fonte { color: var(--color-text-muted); font-size: .8rem; text-align: center; }
 @media (max-width: 600px) {
   .monthly-header { display: none; }
   .monthly-row { grid-template-columns: 50px 1fr 1fr; }

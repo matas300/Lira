@@ -107,7 +107,7 @@ export function renderDistribuzione(rows: AllocRow[], netto: number, rimanente: 
     if (r.val <= 0) return;
     const w = (r.val / netto) * 100;
     const color = COLORS[i % COLORS.length]!;
-    bar += `<div class="budget-bar-seg" style="width:${w}%;background:${color}${r.isAuto ? ';opacity:.6' : ''}" title="${esc(r.nome)}: ${esc(eur(r.val))}"></div>`;
+    bar += `<div class="budget-bar-seg" style="width:${w}%;background:${color}${r.isAuto ? ';opacity:.6' : ''}" title="${esc(r.nome)}: ${esc(eur(r.val))}">${w > 8 ? Math.round(w) + '%' : ''}</div>`;
     legend += `<div class="budget-legend-item">
       <span class="budget-legend-dot" style="background:${color}${r.isAuto ? ';opacity:.6' : ''}"></span>
       <span class="budget-legend-nome">${esc(r.nome || 'Voce ' + (i + 1))}${r.isAuto ? ' (auto)' : ''}</span>
@@ -117,7 +117,7 @@ export function renderDistribuzione(rows: AllocRow[], netto: number, rimanente: 
   });
   if (rimanente > 0) {
     const w = (rimanente / netto) * 100;
-    bar += `<div class="budget-bar-seg budget-bar-rem" style="width:${w}%"></div>`;
+    bar += `<div class="budget-bar-seg budget-bar-rem" style="width:${w}%">${w > 8 ? Math.round(w) + '%' : ''}</div>`;
     legend += `<div class="budget-legend-item">
       <span class="budget-legend-dot budget-legend-rem"></span>
       <span class="budget-legend-nome">Rimanente</span>
@@ -151,7 +151,7 @@ function renderBudget(state: BudgetState, months: MonthLordo[], rate: number, ne
   const netto = computeNettoMensile({ baseMonth: state.baseMonth, months, rate, nettoAnnuo });
   const alloc = computeAllocation(state.items, netto.netto);
   const rowsHtml = state.items.map((it, i) => renderVoceRow(i, it, alloc.rows[i]!, netto.netto)).join('');
-  return `<div class="budget-page">
+  return `<div class="card budget-page">
     <div class="budget-page-header"><h2>Budget ${esc(getYear())}</h2></div>
     ${renderBaseSelector({ baseMonth: state.baseMonth, months, netto })}
     ${renderNettoHeader(netto)}
