@@ -1,7 +1,7 @@
 // src/server/routes/auth.ts
 import { Hono } from 'hono';
 import { setCookie, deleteCookie, getCookie } from 'hono/cookie';
-import { eq } from 'drizzle-orm';
+import { eq, inArray, min, max } from 'drizzle-orm';
 import type { Context } from 'hono';
 import { LoginInput } from '@shared/schemas';
 import { findUserByEmail, listProfilesForUser } from '../lib/users';
@@ -10,7 +10,7 @@ import { createSession, deleteSession, deleteExpiredSessions } from '../lib/sess
 import { requireSession, sessionCookieOptions, SESSION_COOKIE, type AuthEnv } from '../middleware/auth';
 import { HttpError } from '../middleware/error';
 import { zJson } from '../middleware/validate';
-import { users } from '../db/schema';
+import { users, yearSettings } from '../db/schema';
 import type { Db } from '../db/client';
 
 export const authRoute = new Hono<AuthEnv>();
@@ -92,20 +92,37 @@ async function mePayload(db: Db, userId: string, activeProfileId: string) {
   if (profs.length === 0) throw new HttpError(500, 'NO_PROFILE', 'User has no profile');
   const active = profs.find((p) => p.id === activeProfileId) ?? profs[0]!;
 
+  // Range anni configurati (year_settings) per profilo, in una sola query
+  // aggregata. Il client lo usa per agganciare l'anno selezionato al profilo.
+  const ids = profs.map((p) => p.id);
+  const yrRows = ids.length
+    ? await db
+        .select({
+          profileId: yearSettings.profileId,
+          minYear: min(yearSettings.year),
+          maxYear: max(yearSettings.year),
+        })
+        .from(yearSettings)
+        .where(inArray(yearSettings.profileId, ids))
+        .groupBy(yearSettings.profileId)
+    : [];
+  const toNum = (v: unknown): number | null => (v == null ? null : Number(v));
+  const yrMap = new Map(
+    yrRows.map((r) => [r.profileId, { minYear: toNum(r.minYear), maxYear: toNum(r.maxYear) }]),
+  );
+  const withYears = (p: (typeof profs)[number]) => ({
+    id: p.id,
+    slug: p.slug,
+    displayName: p.displayName,
+    giorniIncasso: p.giorniIncasso,
+    minYear: yrMap.get(p.id)?.minYear ?? null,
+    maxYear: yrMap.get(p.id)?.maxYear ?? null,
+  });
+
   return {
     user,
-    profiles: profs.map((p) => ({
-      id: p.id,
-      slug: p.slug,
-      displayName: p.displayName,
-      giorniIncasso: p.giorniIncasso,
-    })),
-    activeProfile: {
-      id: active.id,
-      slug: active.slug,
-      displayName: active.displayName,
-      giorniIncasso: active.giorniIncasso,
-    },
+    profiles: profs.map(withYears),
+    activeProfile: withYears(active),
   };
 }
 

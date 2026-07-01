@@ -9,7 +9,7 @@
 
 import { getMe } from './auth';
 import { renderSidebar, wireSidebar } from '../components/sidebar';
-import { getYear } from './year';
+import { getYear, clampYearToProfile } from './year';
 import type { MeResponse } from '@shared/types';
 
 /** Escape HTML — usare per ogni valore dinamico dentro template innerHTML. */
@@ -51,6 +51,11 @@ export function mountPage(opts: MountPageOpts): () => void {
     const me = await getMe();
     if (disposed) return;
     if (!me) { redirectToLogin(); return; }
+
+    // Aggancia l'anno al range del profilo attivo prima di renderizzare la
+    // shell (che mostra getYear()), così cambiando profilo non si resta su un
+    // anno che il nuovo profilo non ha configurato.
+    clampYearToProfile(me.activeProfile);
 
     opts.container.innerHTML = `
       <div class="app-shell">

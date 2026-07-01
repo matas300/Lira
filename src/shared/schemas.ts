@@ -24,6 +24,11 @@ export const ProfilePublic = z.object({
   slug: z.string(),
   displayName: z.string(),
   giorniIncasso: z.number(),
+  // Range degli anni con year_settings configurate (null se il profilo non ne
+  // ha ancora). Il client lo usa per agganciare l'anno selezionato al profilo
+  // attivo ed evitare di atterrare su un anno non configurato dopo lo switch.
+  minYear: z.number().nullable().optional(),
+  maxYear: z.number().nullable().optional(),
 });
 
 export const MeResponse = z.object({

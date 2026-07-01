@@ -1,7 +1,7 @@
 // src/client/lib/year.test.ts
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { getYear, setYear, MIN_YEAR, maxYear } from './year';
+import { getYear, setYear, clampYearToProfile, MIN_YEAR, maxYear } from './year';
 
 function fakeStorage(initial: Record<string, string> = {}) {
   const m = new Map(Object.entries(initial));
@@ -35,4 +35,28 @@ test('getYear: clamp sopra il massimo', () => {
 test('getYear: valore non numerico → default', () => {
   const s = fakeStorage({ lira_year: 'abc' });
   assert.equal(getYear(s), new Date().getFullYear());
+});
+
+test('clampYearToProfile: sopra maxYear → aggancia a maxYear', () => {
+  const s = fakeStorage({ lira_year: '2026' });
+  assert.equal(clampYearToProfile({ minYear: 2023, maxYear: 2025 }, s), true);
+  assert.equal(getYear(s), 2025);
+});
+
+test('clampYearToProfile: sotto minYear → aggancia a minYear', () => {
+  const s = fakeStorage({ lira_year: '2020' });
+  assert.equal(clampYearToProfile({ minYear: 2023, maxYear: 2027 }, s), true);
+  assert.equal(getYear(s), 2023);
+});
+
+test('clampYearToProfile: dentro il range → nessun cambiamento', () => {
+  const s = fakeStorage({ lira_year: '2024' });
+  assert.equal(clampYearToProfile({ minYear: 2023, maxYear: 2027 }, s), false);
+  assert.equal(getYear(s), 2024);
+});
+
+test('clampYearToProfile: range nullo (profilo senza anni) → no-op', () => {
+  const s = fakeStorage({ lira_year: '2020' });
+  assert.equal(clampYearToProfile({ minYear: null, maxYear: null }, s), false);
+  assert.equal(getYear(s), 2020);
 });
