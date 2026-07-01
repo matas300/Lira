@@ -14,9 +14,12 @@
 //  - acconti REALI (fix A6): somma dei pagamenti puri + breakdown linkedKeys
 //    per le scheduleKey degli acconti imposta/contributi dell'anno PRECEDENTE
 //    (sono quelli che riducono il saldo dell'anno N).
-//  - anno precedente: year_settings(year-1) se presente per `previousTaxBase`
-//    e `previousContribution.saldoAccontoBase`; altrimenti i campi `primoAnno*`
-//    di year_settings(year). Se nulla è valorizzato → 0 (default motore).
+//  - base acconti storico (`previousTaxBase` e `previousContribution.
+//    saldoAccontoBase`): imposta e contributi variabili DOVUTI l'anno
+//    precedente, RICOSTRUITI dallo storico fatture di N-1 con lo stesso motore
+//    (`loadStoricoPriorSeeds`, ricorsione lungo la catena degli anni). Se N-1
+//    non è tracciato si ripiega sui campi manuali `primoAnno*` di
+//    year_settings(year); se nulla è valorizzato → 0 (default motore).
 //
 // Ritorna `null` se mancano le year_settings dell'anno: il route risponderà
 // `{ needsConfig: true }`.
@@ -27,6 +30,7 @@ import { yearSettings, fatture, pagamenti } from '../db/schema';
 import { buildScheduleKey } from '@shared/schedule-keys';
 import { FORFETTARIO_RULES } from '@shared/forfettario-rules';
 import { getInpsArtComForYear } from '@shared/inps-params';
+import { loadStoricoPriorSeeds } from './storico-base';
 import type { ComparisonInput, ContributionParams } from './tax-engine';
 
 type YearSettingsRow = typeof yearSettings.$inferSelect;
@@ -192,12 +196,18 @@ export async function loadScenarioData(
 
   const { grossCollected, monthly } = await loadGrossCollectedMonthly(db, profileId, year, ys);
 
+  // Base "storico" degli acconti = imposta e contributi variabili DOVUTI l'anno
+  // precedente, derivati dallo storico fatture di N-1 (o dai campi manuali
+  // `primoAnno*Prec` se N-1 non è tracciato). Popola gli acconti anche per i
+  // profili importati privi dei campi manuali.
+  const priorSeeds = await loadStoricoPriorSeeds(db, profileId, year, ys, buildContributionParams);
+
   // Parametri contributivi anno N e N-1 (per gli acconti col metodo storico).
   const currentContribution = buildContributionParams(ys, year, 0);
   const previousContribution = buildContributionParams(
     ysPrev,
     year - 1,
-    Number(ysPrev?.primoAnnoContribVariabiliPrec ?? 0),
+    priorSeeds.previousContribVariabili,
   );
 
   // Acconti REALMENTE versati nell'anno precedente (fix A6): riducono il saldo N.
@@ -225,7 +235,7 @@ export async function loadScenarioData(
     grossCollected,
     currentContribution,
     previousContribution,
-    previousTaxBase: Number(ysPrev?.primoAnnoImpostaPrec ?? ys.primoAnnoImpostaPrec ?? 0),
+    previousTaxBase: priorSeeds.previousTaxBase,
     previousContributionAccontiPaid: Number(
       ysPrev?.primoAnnoAccontiContribPrec ?? ys.primoAnnoAccontiContribPrec ?? 0,
     ),

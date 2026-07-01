@@ -48,6 +48,7 @@ import {
   type PaymentBreakdown,
 } from '../lib/scadenziario-engine';
 import { evaluateAuditChecks, type AuditWarning } from '@shared/audit-checks';
+import { loadStoricoPriorSeeds } from '../lib/storico-base';
 import { getInpsArtComForYear } from '@shared/inps-params';
 import { buildScheduleKey } from '@shared/schedule-keys';
 import { FORFETTARIO_RULES } from '@shared/forfettario-rules';
@@ -443,15 +444,21 @@ export async function buildScadenziarioView(
   // 3. fatturato lordo dell'anno (fatture pagate o fallback).
   const grossCollected = await loadGrossCollected(db, profileId, year, ys);
 
-  // 4. parametri contributivi per i due scenari (storico vs previsionale).
+  // 4. base "storico" degli acconti = imposta e contributi variabili DOVUTI
+  //    l'anno precedente. Derivati dallo storico fatture di N-1 (o dei campi
+  //    manuali `primoAnno*Prec` se N-1 non è tracciato). Questo popola gli
+  //    acconti anche per i profili importati che non hanno i campi manuali.
+  const priorSeeds = await loadStoricoPriorSeeds(db, profileId, year, ys, buildContributionParams);
+
+  // 5. parametri contributivi per i due scenari (storico vs previsionale).
   const currentContribution = buildContributionParams(ys, year, 0);
   const previousContribution = buildContributionParams(
     ysPrev,
     year - 1,
-    Number(ysPrev?.primoAnnoContribVariabiliPrec ?? 0),
+    priorSeeds.previousContribVariabili,
   );
 
-  // 5. FIX A6: acconti REALMENTE versati nell'anno precedente.
+  // 6. FIX A6: acconti REALMENTE versati nell'anno precedente.
   const prevYear = year - 1;
   const accontiSostitutivaKeys = [
     buildScheduleKey('imposta_acc1', prevYear),
@@ -472,7 +479,7 @@ export async function buildScadenziarioView(
     accontiContribKeys,
   );
 
-  // 6. comparison input — usa metodo "storico" (build di entrambi gli scenari).
+  // 7. comparison input — usa metodo "storico" (build di entrambi gli scenari).
   // La `methodSetting` decide quale dei due "selected" exporremo.
   const methodSetting = (ys.scadenziarioMetodo === 'previsionale' ? 'previsionale' : 'storico') as
     | 'storico'
@@ -489,7 +496,7 @@ export async function buildScadenziarioView(
     grossCollected,
     currentContribution,
     previousContribution,
-    previousTaxBase: Number(ysPrev?.primoAnnoImpostaPrec ?? 0),
+    previousTaxBase: priorSeeds.previousTaxBase,
     previousContributionAccontiPaid: Number(
       ysPrev?.primoAnnoAccontiContribPrec ?? 0,
     ),
@@ -510,11 +517,11 @@ export async function buildScadenziarioView(
 
   const methodComparison = buildForfettarioMethodComparison(comparisonInput);
 
-  // 7. pagamenti per schedule key + bollo trimestrale.
+  // 8. pagamenti per schedule key + bollo trimestrale.
   const paymentsByKey = await loadPaymentsByKey(db, profileId);
   const bolloByQuarter = await loadBolloByQuarter(db, profileId, year);
 
-  // 8. costruzione scadenziario "puro". Lo shape della yearSettings qui
+  // 9. costruzione scadenziario "puro". Lo shape della yearSettings qui
   // converte i nomi camelCase del DB nei nomi snake-case richiesti
   // dall'engine (riduzione_35, riduzione_35_comunicata).
   const scadOut = buildScadenziario({
@@ -555,7 +562,7 @@ export async function buildScadenziarioView(
     cameraCommerce: CAMERA_COMMERCE_DEFAULT_2A,
   });
 
-  // 9. warnings runtime audit (C1, A1, M1, NO_REVENUE_SOURCE).
+  // 10. warnings runtime audit (C1, A1, M1, NO_REVENUE_SOURCE).
   const auditWarnings = evaluateAuditChecks({
     year,
     yearSettings: {

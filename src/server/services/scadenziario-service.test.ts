@@ -9,11 +9,12 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { createTestDb } from '../db/test-helper';
 import { createUserWithDefaultProfile } from '../lib/users';
 import { buildScadenziarioView } from './scadenziario-service';
-import { yearSettings, pagamenti, profiles } from '../db/schema';
+import { yearSettings, pagamenti, profiles, fatture } from '../db/schema';
 
 async function setup() {
   const { db } = await createTestDb();
@@ -126,6 +127,32 @@ test('profilo senza ALCUNA year_settings → throw YEAR_SETTINGS_NOT_FOUND', asy
     () => buildScadenziarioView({ db, profileId: u.profileId, year: 2026 }),
     /YEAR_SETTINGS_NOT_FOUND/,
   );
+});
+
+test('acconti 2026 derivati dallo storico fatture 2025 (metodo storico) → > 0', async () => {
+  const { db, profileId } = await setup(); // year_settings 2025 + 2026, artigiano
+  // 30.000 € incassati nel 2025: base per gli acconti storico del 2026.
+  await db.insert(fatture).values({
+    id: randomUUID(),
+    profileId,
+    tipoDocumento: 'TD01',
+    annoProgressivo: 2025,
+    data: '2025-03-01',
+    righe: JSON.stringify([{ descrizione: 'x', quantita: 1, prezzoUnitario: 30000 }]),
+    importo: 30000,
+    stato: 'pagata',
+    pagAnno: 2025,
+    pagMese: 3,
+  } as typeof fatture.$inferInsert);
+
+  const view = await buildScadenziarioView({ db, profileId, year: 2026 });
+  const acc1 = view.rows.find((r) => r.id === 'imposta_acc1_2026');
+  const acc2 = view.rows.find((r) => r.id === 'imposta_acc2_2026');
+  assert.ok(acc1 && acc2, 'righe acconto imposta 2026 presenti');
+  // Prima del fix erano 0 (previousTaxBase da campo manuale nullo): ora
+  // derivano dall'imposta 2025 ricostruita dalle fatture.
+  assert.ok(acc1.amount.point > 0, 'acconto 1 imposta 2026 > 0');
+  assert.ok(acc2.amount.point > 0, 'acconto 2 imposta 2026 > 0');
 });
 
 test('methodComparison e transition presenti in output', async () => {
