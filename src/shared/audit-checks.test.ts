@@ -42,10 +42,10 @@ test('C1: grossCollected esattamente 85k → null (uguaglianza ammessa)', () => 
   assert.equal(checkC1_soglia(baseCtx({ grossCollected: 85_000 })), null);
 });
 
-test('C1: grossCollected > 100k → C1_CESSAZIONE_IMMEDIATA', () => {
+test('C1: grossCollected > 100k → C1_CESSAZIONE_IMMEDIATA (block)', () => {
   const r = checkC1_soglia(baseCtx({ grossCollected: 105_000 }));
   assert.equal(r?.code, 'C1_CESSAZIONE_IMMEDIATA');
-  assert.equal(r?.severity, 'warning');
+  assert.equal(r?.severity, 'block');
 });
 
 test('A1: sostitutiva 15% → null', () => {

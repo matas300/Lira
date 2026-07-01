@@ -274,6 +274,13 @@ export interface ForfettarioScenario {
   substituteTax: number;
   /** FIX A6: saldo = ceil2(max(substituteTax - accontiSostitutivaPagatiReali, 0)). */
   taxSaldo: number;
+  /**
+   * Acconti sostitutiva REALMENTE versati (echo dell'input): serve alla
+   * dichiarazione per LM45 (acconti versati) SENZA cap all'imposta, così un
+   * sovra-acconto (acconti > imposta) genera correttamente un credito LM47/
+   * RX31 col.5 invece di sparire (fix A6).
+   */
+  accontiSostitutivaPagatiReali: number;
   taxAccontoBase: number;
   taxAcconti: AccontoPlan;
   /**
@@ -458,6 +465,7 @@ export function buildForfettarioScenario(input: ScenarioInput): ForfettarioScena
     taxableBase,
     substituteTax,
     taxSaldo,
+    accontiSostitutivaPagatiReali: ceil2(Math.max(input.accontiSostitutivaPagatiReali, 0)),
     taxAccontoBase,
     taxAcconti,
     contributiVariabiliDovuti,

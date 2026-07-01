@@ -7,7 +7,7 @@
 // credito), non il segno degli importi.
 
 import { SOGLIA_BOLLO, DICITURA_FORFETTARIO } from './fattura-logic';
-import { isValidPartitaIvaIT, isValidCodiceFiscaleFormat } from './validators';
+import { isValidPartitaIvaIT, isValidCodiceFiscale } from './validators';
 import type { Cedente } from './cedente';
 
 export const XML_NAMESPACE = 'http://ivaservizi.agenziaentrate.gov.it/docs/xsd/fatture/v1.2';
@@ -160,7 +160,7 @@ export function validateFatturaForXml(input: FatturaXmlInput): string[] {
     const naz = (s(c.nazione) || 'IT').toUpperCase();
     if (naz === 'IT') {
       const hasPiva = isValidPartitaIvaIT(s(c.partitaIva).replace(/\s+/g, ''));
-      const hasCf = isValidCodiceFiscaleFormat(s(c.codiceFiscale).toUpperCase());
+      const hasCf = isValidCodiceFiscale(s(c.codiceFiscale).toUpperCase());
       if (!hasPiva && !hasCf) errors.push('Cliente IT senza P.IVA valida né Codice Fiscale: SdI rifiuterà l\'XML.');
     } else if (!s(c.partitaIva).replace(/\s+/g, '') && !s(c.codiceFiscale)) {
       // Senza IdFiscaleIVA il cessionario estero uscirebbe privo di identificativo → scarto SdI.

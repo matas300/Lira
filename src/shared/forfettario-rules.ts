@@ -43,6 +43,35 @@ export function isSostitutivaAmmessa(a: number): boolean {
 }
 
 /**
+ * Coefficiente INPS effettivo per la riduzione 35% (art. 1 c. 77 L. 190/2014):
+ * la riduzione è OPZIONALE e opera SOLO su domanda telematica a INPS entro il
+ * 28/02, a pena di decadenza (Circ. INPS 35/2016). Quindi il coefficiente 0,65
+ * si applica solo se la riduzione è attiva **e** comunicata; altrimenti i
+ * contributi restano dovuti in misura intera (coefficiente 1).
+ *
+ * Accetta indifferentemente `number` (0/1 dal DB) o `boolean`.
+ */
+export function coefficienteRiduzioneInps(
+  riduzione35: number | boolean,
+  comunicata: number | boolean,
+): number {
+  const attiva = riduzione35 === 1 || riduzione35 === true;
+  const comunicataOk = comunicata === 1 || comunicata === true;
+  return attiva && comunicataOk ? FORFETTARIO_RULES.riduzioneInpsCoefficiente : 1;
+}
+
+/**
+ * `true` se la riduzione 35% è realmente applicabile al calcolo: attiva **e**
+ * comunicata a INPS entro il 28/02 (vedi `coefficienteRiduzioneInps`).
+ */
+export function isRiduzione35Applicabile(
+  riduzione35: number | boolean,
+  comunicata: number | boolean,
+): boolean {
+  return coefficienteRiduzioneInps(riduzione35, comunicata) !== 1;
+}
+
+/**
  * Verifica se l'anno corrente rientra nei primi 5 periodi d'imposta dalla
  * data inizio attività, soglia oltre la quale decade l'aliquota startup 5%
  * (art. 1 c. 65 L. 190/2014). Formula: `annoCorrente - annoInizioAttivita

@@ -28,6 +28,7 @@
 import { eq } from 'drizzle-orm';
 import type { Db } from '../db/client';
 import { yearSettings, fatture } from '../db/schema';
+import { annoIncassoOf, importoRicavoCassa } from '@shared/ricavi-cassa';
 import { buildForfettarioScenario, type ContributionParams } from './tax-engine';
 
 type YearSettingsRow = typeof yearSettings.$inferSelect;
@@ -70,14 +71,23 @@ async function preload(db: Db, profileId: string): Promise<Loaded> {
   for (const r of ysRows) ysByYear.set(r.year, r);
 
   const fatRows = await db
-    .select({ pagAnno: fatture.pagAnno, importo: fatture.importo, ritenuta: fatture.ritenuta })
+    .select({
+      importo: fatture.importo,
+      ritenuta: fatture.ritenuta,
+      pagAnno: fatture.pagAnno,
+      stato: fatture.stato,
+      tipoDocumento: fatture.tipoDocumento,
+      dataPagamento: fatture.dataPagamento,
+    })
     .from(fatture)
     .where(eq(fatture.profileId, profileId));
   const grossByYear = new Map<number, number>();
   for (const f of fatRows) {
-    if (f.pagAnno == null) continue; // non incassata → non entra nel lordo dell'anno
-    const netto = Number(f.importo) - Number(f.ritenuta ?? 0);
-    grossByYear.set(f.pagAnno, (grossByYear.get(f.pagAnno) ?? 0) + netto);
+    // Regole di cassa condivise: anno di incasso (pag_anno o dataPagamento),
+    // NC (TD04) sottratte, bozze escluse.
+    const anno = annoIncassoOf(f);
+    if (anno == null) continue;
+    grossByYear.set(anno, (grossByYear.get(anno) ?? 0) + importoRicavoCassa(f));
   }
   return { ysByYear, grossByYear };
 }
@@ -90,7 +100,9 @@ async function preload(db: Db, profileId: string): Promise<Loaded> {
  */
 function grossForYear(loaded: Loaded, year: number): number {
   const g = loaded.grossByYear.get(year);
-  if (g != null && g !== 0) return g;
+  // Fix re-audit #15: arrotonda come sommaRicaviCassa (2 decimali) per evitare
+  // micro-drift FP fra questa base storico e grossCollected in scenario/scadenziario.
+  if (g != null && g !== 0) return Math.round(g * 100) / 100;
   const ys = loaded.ysByYear.get(year);
   if (ys?.primoAnnoFatturatoPrec != null) return Number(ys.primoAnnoFatturatoPrec);
   return g ?? 0;
@@ -160,7 +172,8 @@ function baseFor(
     settings: {
       coefficiente: Number(ys.coefficiente),
       impostaSostitutiva: Number(ys.impostaSostitutiva),
-      riduzione35: ys.riduzione35 === 1,
+      // Fix A2: riduzione applicata solo se attiva E comunicata a INPS.
+      riduzione35: (ys.riduzione35 === 1 && ys.riduzione35Comunicata === 1),
     },
     grossCollected: gross,
     currentContribution,

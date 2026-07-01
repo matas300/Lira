@@ -5,6 +5,8 @@
 //  - computeNettoMensile: netto mensile di riferimento (manuale/auto/media).
 //  - computeAllocation: ripartizione delle voci sul netto mensile (+ auto-split).
 
+import { ricaviCassaPerMese } from '@shared/ricavi-cassa';
+
 export interface BudgetFattura {
   importo: number;
   ritenuta?: number | null;
@@ -12,6 +14,7 @@ export interface BudgetFattura {
   pagMese?: number | null;
   stato?: string | null;
   tipoDocumento?: string | null;
+  dataPagamento?: string | null;
 }
 
 export interface MonthLordo {
@@ -61,22 +64,10 @@ export function ceil2(n: number): number {
  * NC (TD04) sottraggono; le bozze sono escluse; mostra solo mesi con totale > 0.
  */
 export function monthsWithFatture(fatture: BudgetFattura[], year: number): MonthLordo[] {
-  const byMonth = new Map<number, number>();
-  for (const f of fatture) {
-    if (f.pagAnno !== year) continue;
-    if (f.stato === 'bozza') continue;
-    const m = f.pagMese;
-    if (m == null || m < 1 || m > 12) continue;
-    let val = (Number(f.importo) || 0) - (Number(f.ritenuta) || 0);
-    if (f.tipoDocumento === 'TD04') val = -val;
-    byMonth.set(m, (byMonth.get(m) ?? 0) + val);
-  }
-  const out: MonthLordo[] = [];
-  for (const [month, lordo] of byMonth) {
-    if (lordo > 0) out.push({ month, lordo: round2(lordo) });
-  }
-  out.sort((a, b) => a.month - b.month);
-  return out;
+  // Regole di cassa condivise (@shared/ricavi-cassa): anno di incasso (pag_anno
+  // o dataPagamento), NC (TD04) sottratte, bozze escluse. `onlyPositive` tiene
+  // solo i mesi con totale netto > 0 (come nel budget originale).
+  return ricaviCassaPerMese(fatture, year, { onlyPositive: true });
 }
 
 /**

@@ -12,8 +12,10 @@
 //    porta lo stato a 'pagata'; le bozze/inviate non hanno pag_anno).
 //  - breakdown mensile su `pag_mese` (stessa fonte del totale).
 //  - acconti REALI (fix A6): somma dei pagamenti puri + breakdown linkedKeys
-//    per le scheduleKey degli acconti imposta/contributi dell'anno PRECEDENTE
-//    (sono quelli che riducono il saldo dell'anno N).
+//    per le scheduleKey degli acconti imposta/contributi DELL'ANNO N — cioè
+//    quelli versati PER l'anno d'imposta N (30/06/N e 30/11/N) che ne riducono
+//    il saldo (`taxSaldo`, LM45/LM46). NB: NON gli acconti _{N-1} (quelli
+//    riducono il saldo dell'anno precedente lato scadenziario-service).
 //  - base acconti storico (`previousTaxBase` e `previousContribution.
 //    saldoAccontoBase`): imposta e contributi variabili DOVUTI l'anno
 //    precedente, RICOSTRUITI dallo storico fatture di N-1 con lo stesso motore
@@ -28,8 +30,9 @@ import { and, eq, inArray } from 'drizzle-orm';
 import type { Db } from '../db/client';
 import { yearSettings, fatture, pagamenti } from '../db/schema';
 import { buildScheduleKey } from '@shared/schedule-keys';
-import { FORFETTARIO_RULES } from '@shared/forfettario-rules';
+import { coefficienteRiduzioneInps } from '@shared/forfettario-rules';
 import { getInpsArtComForYear } from '@shared/inps-params';
+import { sommaRicaviCassa, ricaviCassaPerMese } from '@shared/ricavi-cassa';
 import { loadStoricoPriorSeeds } from './storico-base';
 import type { ComparisonInput, ContributionParams } from './tax-engine';
 
@@ -72,25 +75,16 @@ async function loadGrossCollectedMonthly(
   year: number,
   ys: YearSettingsRow,
 ): Promise<{ grossCollected: number; monthly: { month: number; lordo: number }[] }> {
-  const rows = await db
-    .select()
-    .from(fatture)
-    .where(and(eq(fatture.profileId, profileId), eq(fatture.pagAnno, year)));
+  // Carichiamo tutte le fatture del profilo e applichiamo le regole di cassa
+  // condivise (`@shared/ricavi-cassa`): anno di incasso = pag_anno o, se manca,
+  // anno di dataPagamento; NC (TD04) sottratte; bozze escluse. Il filtro non è
+  // più in SQL su `pag_anno` per poter recuperare le incassate senza pag_anno.
+  const rows = await db.select().from(fatture).where(eq(fatture.profileId, profileId));
 
-  if (rows.length > 0) {
-    const byMonth = new Map<number, number>();
-    let total = 0;
-    for (const f of rows) {
-      const netto = Number(f.importo) - Number(f.ritenuta ?? 0);
-      total += netto;
-      // pag_mese dovrebbe essere valorizzato insieme a pag_anno; difensivo a 0.
-      const month = f.pagMese ?? 0;
-      byMonth.set(month, (byMonth.get(month) ?? 0) + netto);
-    }
-    const monthly = Array.from(byMonth.entries())
-      .map(([month, lordo]) => ({ month, lordo: round2(lordo) }))
-      .sort((a, b) => a.month - b.month);
-    return { grossCollected: round2(total), monthly };
+  const grossCollected = sommaRicaviCassa(rows, year);
+  const monthly = ricaviCassaPerMese(rows, year);
+  if (grossCollected !== 0 || monthly.length > 0) {
+    return { grossCollected, monthly };
   }
 
   if (ys.primoAnnoFatturatoPrec != null) {
@@ -171,7 +165,8 @@ function buildContributionParams(
   } catch {
     quota = 0;
   }
-  const riduzione = ys.riduzione35 === 1 ? FORFETTARIO_RULES.riduzioneInpsCoefficiente : 1;
+  // Fix A2: riduzione 35% solo se attiva E comunicata a INPS entro 28/02.
+  const riduzione = coefficienteRiduzioneInps(ys.riduzione35, ys.riduzione35Comunicata);
   return {
     mode: 'artigiani_commercianti',
     fixedAnnual: quota * riduzione,
@@ -210,15 +205,19 @@ export async function loadScenarioData(
     priorSeeds.previousContribVariabili,
   );
 
-  // Acconti REALMENTE versati nell'anno precedente (fix A6): riducono il saldo N.
-  const prevYear = year - 1;
+  // Acconti REALMENTE versati PER l'anno d'imposta N (rate 30/06/N e 30/11/N,
+  // competenceYear = N): sono quelli che riducono il saldo dell'imposta N
+  // (`taxSaldo` nello scenario, LM45/LM46 in dichiarazione). FIX re-audit ALTO
+  // #1: qui vanno le chiavi dell'anno N, NON N-1 — gli acconti _{N-1} riducono
+  // il saldo dell'anno PRECEDENTE (dovuto 30/06/N) ed è lo scadenziario-service
+  // a sommarli per la propria riga `imposta_saldo_{N-1}`, non questo scenario.
   const accontiSostitutivaPagatiReali = await sumAccontiReali(db, profileId, [
-    buildScheduleKey('imposta_acc1', prevYear),
-    buildScheduleKey('imposta_acc2', prevYear),
+    buildScheduleKey('imposta_acc1', year),
+    buildScheduleKey('imposta_acc2', year),
   ]);
   const accontiContribPagatiReali = await sumAccontiReali(db, profileId, [
-    buildScheduleKey('contributi_acc1', prevYear),
-    buildScheduleKey('contributi_acc2', prevYear),
+    buildScheduleKey('contributi_acc1', year),
+    buildScheduleKey('contributi_acc2', year),
   ]);
 
   const methodSetting: 'storico' | 'previsionale' =
@@ -230,7 +229,8 @@ export async function loadScenarioData(
     settings: {
       coefficiente: Number(ys.coefficiente),
       impostaSostitutiva: Number(ys.impostaSostitutiva),
-      riduzione35: ys.riduzione35 === 1,
+      // Fix A2: riduzione applicata solo se attiva E comunicata a INPS.
+      riduzione35: (ys.riduzione35 === 1 && ys.riduzione35Comunicata === 1),
     },
     grossCollected,
     currentContribution,

@@ -10,6 +10,8 @@
 //
 // PURO: nessun DOM, nessun fetch, nessun side-effect.
 
+import { annoIncassoOf, meseIncassoOf, importoRicavoCassa } from '@shared/ricavi-cassa';
+
 export interface AccFattura {
   importo: number;
   ritenuta?: number | null;
@@ -17,6 +19,9 @@ export interface AccFattura {
   annoProgressivo?: number | null;
   pagAnno?: number | null;
   pagMese?: number | null;
+  stato?: string | null;
+  tipoDocumento?: string | null;
+  dataPagamento?: string | null;
   clienteSnapshot?: string | null;
   numeroDisplay?: string | null;
 }
@@ -105,18 +110,23 @@ export function computeAccantonamento(args: {
   const rate = Number.isFinite(effectiveRate) ? effectiveRate : 0;
 
   // ── rows: fatture incassate nell'anno ────────────────────────────────────
+  // Regole di cassa condivise (@shared/ricavi-cassa): anno di incasso (pag_anno
+  // o dataPagamento), bozze escluse, note di credito (TD04) col segno negativo
+  // (fix A5: prima le NC gonfiavano l'accantonamento invece di ridurlo).
   const rows: AccRow[] = [];
   for (const f of fatture) {
-    if (f.pagAnno !== year) continue;
-    const lordo = (Number(f.importo) || 0) - (Number(f.ritenuta) || 0);
-    const mese = f.pagMese != null && f.pagMese >= 1 && f.pagMese <= 12
-      ? f.pagMese
-      : monthFromDate(f.data);
+    if (annoIncassoOf(f) !== year) continue;
+    const lordo = importoRicavoCassa(f);
+    const mese = meseIncassoOf(f) ?? monthFromDate(f.data);
+    // Fix re-audit MEDIO #5: NON clampiamo la singola riga a 0. Una nota di
+    // credito (TD04) ha `lordo` negativo e deve SOTTRARSI dall'imponibile (come
+    // fa il server in sommaRicaviCassa), non essere azzerata. Il clamp resta
+    // solo sul TOTALE annuo, per non mostrare un accantonamento negativo.
     rows.push({
       label: labelFromFattura(f),
       mese,
-      lordo: round2(Math.max(0, lordo)),
-      daAccantonare: round2(Math.max(0, lordo) * rate),
+      lordo: round2(lordo),
+      daAccantonare: round2(lordo * rate),
     });
   }
 
@@ -124,8 +134,8 @@ export function computeAccantonamento(args: {
   rows.sort((a, b) => a.mese - b.mese);
 
   // ── totals ───────────────────────────────────────────────────────────────
-  const totaleLordo = round2(rows.reduce((s, r) => s + r.lordo, 0));
-  const totaleDaAccantonare = round2(rows.reduce((s, r) => s + r.daAccantonare, 0));
+  const totaleLordo = round2(Math.max(0, rows.reduce((s, r) => s + r.lordo, 0)));
+  const totaleDaAccantonare = round2(Math.max(0, rows.reduce((s, r) => s + r.daAccantonare, 0)));
   const totaleVersato = round2(pagamenti
     .filter((p) => p.tipo != null && VERSATO_TIPI.has(p.tipo))
     .reduce((s, p) => s + (Number(p.importo) || 0), 0));
@@ -134,25 +144,28 @@ export function computeAccantonamento(args: {
   // ── cumulative ───────────────────────────────────────────────────────────
   const cumulative: AccCumPoint[] = [];
   for (let m = 1; m <= 12; m++) {
-    const maturato = round2(rows
+    const maturato = round2(Math.max(0, rows
       .filter((r) => r.mese <= m)
-      .reduce((s, r) => s + r.daAccantonare, 0));
+      .reduce((s, r) => s + r.daAccantonare, 0)));
     const versato = round2(pagamenti
       .filter((p) => p.tipo != null && VERSATO_TIPI.has(p.tipo) && monthFromDate(p.data) <= m)
       .reduce((s, p) => s + (Number(p.importo) || 0), 0));
     cumulative.push({ month: m, maturato, versato });
   }
 
-  // ── deferred: emesse nell'anno ma pagAnno !== year ───────────────────────
+  // ── deferred: emesse nell'anno ma non incassate nell'anno ────────────────
+  // Fix re-audit #16: usiamo annoIncassoOf (come le rows) invece di f.pagAnno,
+  // così una fattura incassata via dataPagamento (pagAnno null) non compare sia
+  // in rows sia in deferred.
   const deferred: AccDeferred[] = [];
   for (const f of fatture) {
     const annoEmissione = Number(f.data.slice(0, 4));
     if (annoEmissione !== year) continue;   // non emessa quest'anno
-    if (f.pagAnno === year) continue;       // già incassata nell'anno → rows
+    if (annoIncassoOf(f) === year) continue; // già incassata nell'anno → rows
     deferred.push({
       label: labelFromFattura(f),
       importo: Number(f.importo) || 0,
-      annoIncasso: f.pagAnno != null ? Number(f.pagAnno) : null,
+      annoIncasso: annoIncassoOf(f),
     });
   }
 

@@ -41,6 +41,8 @@ export interface AuditContext {
     riduzione_35: number;
     riduzione_35_comunicata: number;
     scadenziarioMetodo: string;
+    /** Flag redditi da lavoro dipendente/assimilati nell'anno (causa ostativa d-ter). */
+    haRedditoDipendente?: number;
   };
   profile: { dataInizioAttivita: string };
   grossCollected: number;
@@ -71,7 +73,10 @@ export function checkC1_soglia(ctx: AuditContext): AuditWarning | null {
   if (grossCollected > sogliaCessazioneImmediata) {
     return {
       code: 'C1_CESSAZIONE_IMMEDIATA',
-      severity: 'warning',
+      // Fix A4/M13: la cessazione immediata invalida il calcolo forfettario
+      // (IVA dovuta + IRPEF ordinaria) → severità `block`, coerente con gli
+      // altri eventi che rendono il calcolo non conforme (es. startup 5%).
+      severity: 'block',
       title: 'Soglia 100.000 € superata',
       message: `Hai incassato ${grossCollected.toLocaleString('it-IT')} € `
         + `oltre la soglia di ${sogliaCessazioneImmediata.toLocaleString('it-IT')} €. `
@@ -201,6 +206,30 @@ export function checkM1_riduzione35NonComunicata(ctx: AuditContext): AuditWarnin
 }
 
 /**
+ * D-ter — Causa ostativa "redditi da lavoro dipendente/assimilati > 30.000 €"
+ * (art. 1 c. 57 lett. d-ter L. 190/2014): chi nell'anno PRECEDENTE ha percepito
+ * redditi ex artt. 49-50 TUIR eccedenti 30.000 € non può applicare il regime
+ * forfettario (salvo rapporto cessato). Lira non cattura ancora l'IMPORTO di
+ * tali redditi, quindi non può bloccare automaticamente: quando il flag
+ * `haRedditoDipendente` è attivo emette un avviso di verifica.
+ */
+export function checkDter_redditoDipendente(ctx: AuditContext): AuditWarning | null {
+  if (ctx.yearSettings.haRedditoDipendente !== 1) return null;
+  return {
+    code: 'D_TER_REDDITO_DIPENDENTE',
+    severity: 'warning',
+    title: 'Verifica causa ostativa redditi da lavoro dipendente',
+    message: 'Risultano redditi da lavoro dipendente/assimilati. Se nell\'anno '
+      + 'precedente hanno superato 30.000 € (e il rapporto non è cessato) NON '
+      + 'puoi applicare il regime forfettario (art. 1 c. 57 lett. d-ter '
+      + 'L. 190/2014): il calcolo forfettario risulterebbe non dovuto.',
+    suggestedAction: 'Verifica l\'importo dei redditi da lavoro dipendente '
+      + 'dell\'anno precedente; se > 30.000 € valuta il regime ordinario.',
+    context: { year: ctx.year },
+  };
+}
+
+/**
  * Info — Nessuna fonte di ricavo registrata. Non è un finding dell'audit,
  * ma un suggerimento UX: se l'utente apre l'anno e non ha incassi, il
  * dashboard può proporgli import legacy / inserimento manuale.
@@ -233,6 +262,8 @@ export function evaluateAuditChecks(ctx: AuditContext): AuditWarning[] {
   if (a1) out.push(a1);
   const m1 = checkM1_riduzione35NonComunicata(ctx);
   if (m1) out.push(m1);
+  const dter = checkDter_redditoDipendente(ctx);
+  if (dter) out.push(dter);
   const noRevenue = checkNoRevenueSource(ctx);
   if (noRevenue) out.push(noRevenue);
   return out;

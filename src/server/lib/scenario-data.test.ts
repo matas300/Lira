@@ -64,10 +64,22 @@ test('loadScenarioData: somma fatture incassate dell anno + breakdown mensile', 
   // 1 fattura incassata in altro anno (non deve entrare nel 2025).
   await seedFattura(db, profileId, { importo: 5000, data: '2024-12-01', pagAnno: 2024, pagMese: 12, stato: 'pagata' });
 
-  // 1 acconto imposta dell'anno precedente realmente versato (riduce il saldo 2025).
+  // Acconti imposta 2025 REALMENTE versati (30/06 e 30/11 del 2025): sono quelli
+  // che riducono il saldo dell'imposta 2025 (LM45/LM46). Fix re-audit ALTO #1.
+  await db.insert(pagamenti).values({
+    id: randomUUID(), profileId, year: 2025,
+    data: '2025-06-30', tipo: 'tasse', importo: 200,
+    scheduleKey: buildScheduleKey('imposta_acc1', 2025),
+  });
+  await db.insert(pagamenti).values({
+    id: randomUUID(), profileId, year: 2025,
+    data: '2025-11-30', tipo: 'tasse', importo: 300,
+    scheduleKey: buildScheduleKey('imposta_acc2', 2025),
+  });
+  // Decoy: acconto 2024 (riduce il saldo 2024, NON il 2025) → NON deve entrare.
   await db.insert(pagamenti).values({
     id: randomUUID(), profileId, year: 2024,
-    data: '2024-11-30', tipo: 'tasse', importo: 300,
+    data: '2024-11-30', tipo: 'tasse', importo: 999,
     scheduleKey: buildScheduleKey('imposta_acc2', 2024),
   });
 
@@ -84,6 +96,8 @@ test('loadScenarioData: somma fatture incassate dell anno + breakdown mensile', 
   assert.equal(data!.comparisonInput.grossCollected, 25000);
   assert.equal(data!.comparisonInput.year, 2025);
   assert.equal(data!.comparisonInput.settings.coefficiente, 0.67);
+  // Gli acconti presi sono quelli del 2025 (200+300=500), non il decoy 2024 (999).
+  assert.equal(data!.comparisonInput.accontiSostitutivaPagatiReali, 500);
 });
 
 test('loadScenarioData: year-settings assenti → null', async () => {

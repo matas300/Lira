@@ -3,7 +3,7 @@
 // Logica fiscale pura e riusabile per le fatture (Slice 5A). Nessuna
 // dipendenza DOM/DB: usata dai refine Zod, dalla route e dai test.
 
-import { isValidPartitaIvaIT, isValidCodiceFiscaleFormat } from './validators';
+import { isValidPartitaIvaIT, isValidCodiceFiscale } from './validators';
 
 export interface RigaLike {
   descrizione?: string;
@@ -85,6 +85,8 @@ export function validateClienteSnapshot(snap: ClienteSnapshotLike | null | undef
   const piva = String(snap.partitaIva || '').replace(/\s+/g, '');
   const cf = String(snap.codiceFiscale || '').trim().toUpperCase();
   const hasPiva = piva.length > 0 && isValidPartitaIvaIT(piva);
-  const hasCf = cf.length > 0 && isValidCodiceFiscaleFormat(cf);
+  // Check-char incluso (fix re-audit ALTO #4): un CF con carattere di controllo
+  // errato passa il solo formato ma viene scartato da SdI nel CessionarioCommittente.
+  const hasCf = cf.length > 0 && isValidCodiceFiscale(cf);
   return hasPiva || hasCf ? null : MSG_CLIENTE_IT;
 }

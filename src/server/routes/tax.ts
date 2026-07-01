@@ -29,7 +29,7 @@ import { zValidator } from '@hono/zod-validator';
 import { TaxSimulateInput } from '@shared/schemas';
 import { INPS_ARTCOM, INPS_GS, getInpsArtComForYear } from '@shared/inps-params';
 import { ACCONTO_RULES } from '@shared/acconto-rules';
-import { FORFETTARIO_RULES } from '@shared/forfettario-rules';
+import { FORFETTARIO_RULES, coefficienteRiduzioneInps } from '@shared/forfettario-rules';
 import { buildForfettarioScenario, buildForfettarioMethodComparison } from '../lib/tax-engine';
 import { loadScenarioData } from '../lib/scenario-data';
 import { HttpError } from '../middleware/error';
@@ -88,8 +88,14 @@ taxRoute.post('/simulate', zValidator('json', TaxSimulateInput), (c) => {
 
   const coefficiente = body.settings?.coefficiente ?? 0.67;
   const sostitutiva = body.settings?.impostaSostitutiva ?? FORFETTARIO_RULES.sostitutivaStandard;
-  const riduzioneApplica = body.settings?.riduzione35 === 1;
-  const riduzioneFactor = riduzioneApplica ? FORFETTARIO_RULES.riduzioneInpsCoefficiente : 1;
+  // Fix re-audit MEDIO #9: la riduzione 35% si applica solo se attiva E
+  // comunicata a INPS entro il 28/02 (art. 1 c. 77 L. 190/2014), coerente con
+  // scadenziario/scenario. Prima /simulate guardava il solo flag riduzione35.
+  const riduzioneFactor = coefficienteRiduzioneInps(
+    body.settings?.riduzione35 ?? 0,
+    body.settings?.riduzione35Comunicata ?? 0,
+  );
+  const riduzioneApplica = riduzioneFactor < 1;
   const categoria = body.settings?.inpsCategoria ?? 'artigiano';
   const fixedAnnual =
     (categoria === 'commerciante'

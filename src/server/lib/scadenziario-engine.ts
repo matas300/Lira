@@ -39,7 +39,7 @@ import {
 } from './tax-engine';
 import { buildScheduleKey, type ScheduleFamily } from '@shared/schedule-keys';
 import { buildRolledDueDate } from '@shared/date-rules';
-import { FORFETTARIO_RULES } from '@shared/forfettario-rules';
+import { coefficienteRiduzioneInps } from '@shared/forfettario-rules';
 import { getInpsArtComForYear } from '@shared/inps-params';
 import type { AuditWarning } from '@shared/audit-checks';
 
@@ -76,6 +76,16 @@ export interface ScadenziarioInput {
   paymentsByKey: Map<string, { paidTotal: number; payments: PaymentBreakdown[] }>;
   bolloByQuarter: { q12: number; q3: number; q4: number };
   cameraCommerce: number;
+  /**
+   * Fix A1 — saldo (imposta sostitutiva + contributi variabili) di competenza
+   * N-1 dovuto il 30/06/N: DEVE essere calcolato sull'anno N-1 = imposta/
+   * contributi DOVUTI per N-1 (dallo storico fatture) − acconti versati per
+   * N-1. `scenario.taxSaldo`/`contributionSaldo` sono invece calcolati sul
+   * reddito dell'anno N (giusto solo per gli acconti competenza N): usarli per
+   * la riga saldo N-1 mescola due anni d'imposta. Se assente, si ripiega su
+   * `scenario` per retrocompatibilità.
+   */
+  saldoPrecedente?: { imposta: number; contributi: number } | null;
 }
 
 export interface ScadenziarioRow {
@@ -174,8 +184,11 @@ function buildSeeds(input: ScadenziarioInput): RowSeed[] {
         yearSettings.inpsCategoria === 'commerciante'
           ? params.quotaFissaAnnuaCommerciante
           : params.quotaFissaAnnuaArtigiano;
-      const riduzione =
-        yearSettings.riduzione_35 === 1 ? FORFETTARIO_RULES.riduzioneInpsCoefficiente : 1;
+      // Fix A2: riduzione 35% solo se attiva E comunicata a INPS entro 28/02.
+      const riduzione = coefficienteRiduzioneInps(
+        yearSettings.riduzione_35,
+        yearSettings.riduzione_35_comunicata,
+      );
       // Fix audit: arrotonda a 2 decimali (FP-safe) — con riduzione 35% la
       // divisione per 4 produce millesimi (es. 4460.64 × 0.65 / 4 = 724.854
       // → 724.86), che non sono importi F24 validi.
@@ -186,6 +199,16 @@ function buildSeeds(input: ScadenziarioInput): RowSeed[] {
   const certaintyTax: 'estimated' | 'forecast' =
     method === 'previsionale' ? 'forecast' : 'estimated';
 
+  // Fix A1: il saldo N-1 (dovuto 30/06/N) usa la base dell'anno N-1 quando il
+  // service la fornisce (`saldoPrecedente`); altrimenti ripiega su `scenario`
+  // (calcolato sul reddito N — corretto solo per gli acconti competenza N).
+  const taxSaldoAmount = input.saldoPrecedente
+    ? input.saldoPrecedente.imposta
+    : scenario.taxSaldo;
+  const contribSaldoAmount = input.saldoPrecedente
+    ? input.saldoPrecedente.contributi
+    : scenario.contributionSaldo;
+
   const seeds: RowSeed[] = [
     // Imposta sostitutiva — saldo (N-1) + 2 acconti (N).
     {
@@ -194,7 +217,7 @@ function buildSeeds(input: ScadenziarioInput): RowSeed[] {
       dueDateBase: `${year}-06-30`,
       title: 'Imposta sostitutiva — saldo',
       kind: 'tax',
-      amount: fixedPoint(scenario.taxSaldo),
+      amount: fixedPoint(taxSaldoAmount),
       certainty: certaintyTax,
     },
     {
@@ -223,7 +246,7 @@ function buildSeeds(input: ScadenziarioInput): RowSeed[] {
       dueDateBase: `${year}-06-30`,
       title: 'INPS variabile — saldo',
       kind: 'contribution',
-      amount: fixedPoint(scenario.contributionSaldo),
+      amount: fixedPoint(contribSaldoAmount),
       certainty: certaintyTax,
     },
     {
@@ -316,10 +339,12 @@ function buildSeeds(input: ScadenziarioInput): RowSeed[] {
       certainty: 'official',
     },
 
-    // Diritto camerale — competenza N-1, versamento 30/06/N (prorogabile A5).
+    // Diritto camerale — competenza N (dovuto PER l'anno in corso), versamento
+    // 30/06/N insieme al 1° versamento imposte (prorogabile A5). Fix M3: la
+    // competenza è l'anno in corso, non N-1.
     {
       family: 'camera',
-      competenceYear: year - 1,
+      competenceYear: year,
       dueDateBase: `${year}-06-30`,
       title: 'Diritto camerale',
       kind: 'tax',

@@ -49,7 +49,10 @@ export interface ScadenziarioRow {
 
 export interface AuditWarning {
   code: string;
-  severity: 'critical' | 'high' | 'warn' | 'info';
+  // Il server (shared/audit-checks) emette il vocabolario `info | warning |
+  // block`; teniamo anche i valori legacy `critical | high | warn` per
+  // retro-compatibilità. renderWarnings li mappa sulle classi CSS esistenti.
+  severity: 'block' | 'critical' | 'high' | 'warning' | 'warn' | 'info';
   title: string;
   message: string;
 }
@@ -213,10 +216,27 @@ export function renderRowsTable(rows: ScadenziarioRow[], today: string): string 
 
 // ────────────────────────── renderWarnings ────────────────────────────────
 
+/**
+ * Mappa la severity del server (`info | warning | block`) sulle classi CSS
+ * dello scadenziario (`scad-warn-{critical|high|warn|info}`), che sono le
+ * uniche stilizzate. Senza questa mappa `block`/`warning` cadrebbero su classi
+ * inesistenti e apparirebbero MENO evidenti di un `info` (fix re-audit §2.D).
+ */
+function warnSeverityClass(severity: string): 'critical' | 'high' | 'warn' | 'info' {
+  switch (severity) {
+    case 'block': return 'critical';
+    case 'warning': return 'warn';
+    case 'critical': return 'critical';
+    case 'high': return 'high';
+    case 'warn': return 'warn';
+    default: return 'info';
+  }
+}
+
 export function renderWarnings(warnings: AuditWarning[]): string {
   if (!warnings.length) return '';
   const items = warnings.map((w) =>
-    `<div class="scad-warn-item scad-warn-${esc(w.severity)}">
+    `<div class="scad-warn-item scad-warn-${warnSeverityClass(w.severity)}">
       <strong>${esc(w.title)}</strong>
       <p>${esc(w.message)}</p>
     </div>`

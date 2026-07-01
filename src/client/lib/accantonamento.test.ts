@@ -104,6 +104,35 @@ test('computeAccantonamento: effectiveRate=0 → tutto 0 senza NaN', () => {
   });
 });
 
+test('computeAccantonamento: nota di credito (TD04) SOTTRAE dall\'imponibile, non azzerata (fix MEDIO #5)', () => {
+  const fatture: AccFattura[] = [
+    f({ importo: 1000, pagAnno: 2025, pagMese: 2, data: '2025-02-10', tipoDocumento: 'TD01', stato: 'pagata' }),
+    f({ importo: 300, pagAnno: 2025, pagMese: 4, data: '2025-04-10', tipoDocumento: 'TD04', stato: 'pagata' }),
+  ];
+  const result = computeAccantonamento({ fatture, pagamenti: [], year: 2025, effectiveRate: 0.30 });
+  // Imponibile netto = 1000 - 300 = 700; daAccantonare = 700 * 0.30 = 210
+  // (prima del fix: la NC era azzerata → 1000 / 300).
+  assert.equal(result.totals.lordo, 700);
+  assert.equal(result.totals.daAccantonare, 210);
+  // La riga NC è negativa, non azzerata.
+  const ncRow = result.rows.find((r) => r.lordo < 0);
+  assert.ok(ncRow, 'la riga NC deve avere lordo negativo');
+  assert.equal(ncRow!.lordo, -300);
+  assert.equal(ncRow!.daAccantonare, -90);
+});
+
+test('computeAccantonamento: totale non va mai sotto zero (clamp solo sul totale)', () => {
+  // NC maggiore dell\'imponibile positivo → il totale resta 0, non negativo.
+  const fatture: AccFattura[] = [
+    f({ importo: 100, pagAnno: 2025, pagMese: 2, data: '2025-02-10', tipoDocumento: 'TD01', stato: 'pagata' }),
+    f({ importo: 500, pagAnno: 2025, pagMese: 4, data: '2025-04-10', tipoDocumento: 'TD04', stato: 'pagata' }),
+  ];
+  const result = computeAccantonamento({ fatture, pagamenti: [], year: 2025, effectiveRate: 0.30 });
+  assert.equal(result.totals.lordo, 0);
+  assert.equal(result.totals.daAccantonare, 0);
+  result.cumulative.forEach((pt) => assert.ok(pt.maturato >= 0, `maturato ${pt.month} negativo`));
+});
+
 test('computeAccantonamento: label da clienteSnapshot (nome)', () => {
   const fattura: AccFattura = {
     importo: 1000,

@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   isValidPartitaIvaIT,
   isValidCodiceFiscaleFormat,
+  isValidCodiceFiscale,
   isValidCodiceSdi,
   isValidPec,
 } from './validators';
@@ -29,6 +30,27 @@ test('isValidCodiceFiscaleFormat — solo formato 16 alfanumerici uppercase', ()
   assert.equal(isValidCodiceFiscaleFormat('rssmra80a01h501u'), false);
   assert.equal(isValidCodiceFiscaleFormat('RSSMRA80A01H501'), false);
   assert.equal(isValidCodiceFiscaleFormat('RSSMRA80A01H501!'), false);
+});
+
+test('isValidCodiceFiscale — check-char corretto (persona fisica)', () => {
+  assert.equal(isValidCodiceFiscale('RSSMRA80A01H501U'), true);   // valido
+  assert.equal(isValidCodiceFiscale('rssmra80a01h501u'), true);   // uppercase interno
+  assert.equal(isValidCodiceFiscale('RSSMRA80A01H501X'), false);  // check-char errato (atteso U)
+  assert.equal(isValidCodiceFiscale('RSSMTT90A01H501X'), false);  // check-char errato (atteso V)
+  assert.equal(isValidCodiceFiscale('RSSMRA80A01H501'), false);   // 15 char
+});
+
+test('isValidCodiceFiscale — ente/società = 11 cifre (algoritmo P.IVA)', () => {
+  assert.equal(isValidCodiceFiscale('00743110157'), true);
+  assert.equal(isValidCodiceFiscale('00743110158'), false);
+});
+
+test('isValidCodiceFiscale — accetta i codici OMOCODICI (lettere al posto delle cifre)', () => {
+  // Omocodia di 1° livello di RSSMRA80A01H501U: l'ultima cifra del gruppo comune
+  // (1 → M) diventa lettera; il check-char ricalcolato è 'M'.
+  assert.equal(isValidCodiceFiscale('RSSMRA80A01H50MM'), true);
+  // Stesso codice ma con check-char errato → respinto.
+  assert.equal(isValidCodiceFiscale('RSSMRA80A01H50ML'), false);
 });
 
 test('isValidCodiceSdi — PA 6 char, altri 7 char', () => {

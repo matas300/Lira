@@ -135,18 +135,30 @@ export function applyDichiarazioneOverrides(
   s: ForfettarioScenario, ov: DichiarazioneOverridesInput,
 ): DichiarazioneOverridesApplied {
   const imposta = r0(s.substituteTax);
-  const accDefault = Math.max(0, r0(s.substituteTax - s.taxSaldo)); // acconti imputati (6A)
-  const acc = pickOverride(ov.accontiVersati, accDefault);
+  // Fix A6: LM45 = acconti REALMENTE versati (non cappati all'imposta). Con il
+  // vecchio `substituteTax − taxSaldo` un sovra-acconto (acconti > imposta)
+  // veniva troncato all'imposta e il credito LM47/RX31 col.5 spariva. Usiamo il
+  // dato reale dallo scenario (coerente col taxSaldo), con fallback prudente.
+  const accReali = s.accontiSostitutivaPagatiReali != null
+    ? Math.max(0, r0(s.accontiSostitutivaPagatiReali))
+    : Math.max(0, r0(s.substituteTax - s.taxSaldo));
+  const acc = pickOverride(ov.accontiVersati, accReali);
   const cred = pickOverride(ov.creditiImposta, 0);
   const credPrev = pickOverride(ov.creditoAnnoPrec, 0);
-  const detrazioni = acc.value + cred.value + credPrev.value; // già in euro interi
+  // Fix M4: i crediti d'imposta (LM40) si scomputano fino a CONCORRENZA
+  // dell'imposta (LM39); l'eccedenza NON genera credito RX31 col.5 (va nel
+  // quadro RN). Solo acconti (LM45) ed eccedenza dich. precedente (LM43)
+  // possono generare il credito da riportare.
+  const creditiUsati = Math.min(cred.value, imposta);
+  const differenza = Math.max(0, imposta - creditiUsati); // LM42 (differenza)
+  const netDebito = differenza - credPrev.value - acc.value;
   return {
     imposta,
     accontiVersati: acc.value,
     creditiImposta: cred.value,
     creditoAnnoPrec: credPrev.value,
-    saldoEffettivo: Math.max(0, imposta - detrazioni),
-    creditoDaRiportare: Math.max(0, detrazioni - imposta),
+    saldoEffettivo: Math.max(0, netDebito),
+    creditoDaRiportare: Math.max(0, -netDebito),
     overridden: { accontiVersati: acc.overridden, creditiImposta: cred.overridden, creditoAnnoPrec: credPrev.overridden },
   };
 }

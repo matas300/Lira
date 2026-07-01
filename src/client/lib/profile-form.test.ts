@@ -52,7 +52,7 @@ test('fieldError: vuoto = nessun errore; formato sbagliato = messaggio', () => {
   assert.equal(fieldError('partita_iva', ''), null);
   assert.equal(fieldError('partita_iva', '123'), 'P.IVA non valida (11 cifre).');
   assert.equal(fieldError('partita_iva', '00743110157'), null);
-  assert.equal(fieldError('cf', 'abc'), 'Codice fiscale non valido.');
+  assert.equal(fieldError('cf', 'abc'), 'Codice fiscale non valido (verifica il carattere di controllo).');
   assert.equal(fieldError('cap', '123'), 'CAP non valido (5 cifre).');
   assert.equal(fieldError('cap', '00100'), null);
   assert.equal(fieldError('provincia', 'ROMA'), 'Provincia: 2 lettere.');

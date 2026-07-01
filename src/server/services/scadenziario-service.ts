@@ -39,6 +39,7 @@ import type { Db } from '../db/client';
 import { yearSettings, pagamenti, fatture, profiles } from '../db/schema';
 import {
   buildForfettarioMethodComparison,
+  ceil2,
   type ComparisonInput,
   type ContributionParams,
 } from '../lib/tax-engine';
@@ -48,10 +49,12 @@ import {
   type PaymentBreakdown,
 } from '../lib/scadenziario-engine';
 import { evaluateAuditChecks, type AuditWarning } from '@shared/audit-checks';
+import { sommaRicaviCassa, isIncassoSenzaAnno } from '@shared/ricavi-cassa';
 import { loadStoricoPriorSeeds } from '../lib/storico-base';
 import { getInpsArtComForYear } from '@shared/inps-params';
 import { buildScheduleKey } from '@shared/schedule-keys';
-import { FORFETTARIO_RULES } from '@shared/forfettario-rules';
+import { coefficienteRiduzioneInps } from '@shared/forfettario-rules';
+import { SOGLIA_BOLLO } from '@shared/fattura-logic';
 import { HttpError } from '../middleware/error';
 
 // --- Public surface -----------------------------------------------------
@@ -161,19 +164,11 @@ async function loadGrossCollected(
   year: number,
   ys: YearSettingsRow,
 ): Promise<number> {
-  const rows = await db
-    .select()
-    .from(fatture)
-    .where(and(eq(fatture.profileId, profileId), eq(fatture.pagAnno, year)));
-  if (rows.length > 0) {
-    let total = 0;
-    for (const f of rows) {
-      const importo = Number(f.importo);
-      const ritenuta = Number(f.ritenuta ?? 0);
-      total += importo - ritenuta;
-    }
-    return total;
-  }
+  // Regole di cassa condivise (`@shared/ricavi-cassa`): anno di incasso =
+  // pag_anno o anno di dataPagamento; NC (TD04) sottratte; bozze escluse.
+  const rows = await db.select().from(fatture).where(eq(fatture.profileId, profileId));
+  const gross = sommaRicaviCassa(rows, year);
+  if (gross !== 0) return gross;
   if (ys.primoAnnoFatturatoPrec != null) {
     return Number(ys.primoAnnoFatturatoPrec);
   }
@@ -324,6 +319,17 @@ async function loadBolloByQuarter(
   let q4 = 0;
   for (const f of rows) {
     if (f.marcaDaBollo !== 1) continue;
+    // Fix M1: il bollo è dovuto solo su documenti EMESSI. Le bozze (che possono
+    // avere il flag valorizzato manualmente prima dell'invio) e le note di
+    // credito (TD04, esenti) non concorrono all'F24 trimestrale.
+    if (f.stato === 'bozza') continue;
+    if (f.tipoDocumento === 'TD04') continue;
+    // Fix re-audit MEDIO #6: il bollo virtuale da 2 € è dovuto solo se
+    // l'imponibile supera 77,47 € (art. 6 DM 17/06/2014). Un flag `marca_da_bollo`
+    // rimasto attivo su una fattura sotto soglia (fatture.ts conserva il flag
+    // manuale) NON emette <DatiBollo> nell'XML: conteggiarlo qui gonfierebbe
+    // l'F24 rispetto al documento reale. Stessa soglia strict di fattura-xml.
+    if (!(Number(f.importo) > SOGLIA_BOLLO)) continue;
     const date = String(f.data);
     if (!date.startsWith(prefix)) continue;
     const monthStr = date.slice(5, 7);
@@ -338,6 +344,27 @@ async function loadBolloByQuarter(
     }
   }
   return { q12, q3, q4 };
+}
+
+/**
+ * Conta le fatture che risultano INCASSATE ma senza un anno di incasso
+ * determinabile (`pag_anno` e `dataPagamento` entrambi assenti): i loro ricavi
+ * non entrano in alcun anno e vanno segnalati (fix A3, "pagamenti persi").
+ */
+async function countIncassiSenzaAnno(db: Db, profileId: string): Promise<number> {
+  const rows = await db
+    .select({
+      importo: fatture.importo,
+      pagAnno: fatture.pagAnno,
+      stato: fatture.stato,
+      tipoDocumento: fatture.tipoDocumento,
+      dataPagamento: fatture.dataPagamento,
+    })
+    .from(fatture)
+    .where(eq(fatture.profileId, profileId));
+  let n = 0;
+  for (const f of rows) if (isIncassoSenzaAnno(f)) n++;
+  return n;
 }
 
 // --- INPS shaping -------------------------------------------------------
@@ -372,12 +399,13 @@ function buildContributionParams(
   } catch {
     quota = 0;
   }
-  const riduzione =
-    ys.riduzione35 === 1 ? FORFETTARIO_RULES.riduzioneInpsCoefficiente : 1;
+  // Fix A2: la riduzione 35% si applica solo se attiva E comunicata a INPS.
+  const riduzione = coefficienteRiduzioneInps(ys.riduzione35, ys.riduzione35Comunicata);
   return {
     mode: 'artigiani_commercianti',
     fixedAnnual: quota * riduzione,
     saldoAccontoBase,
+    categoria: ys.inpsCategoria === 'commerciante' ? 'commerciante' : 'artigiano',
   };
 }
 
@@ -491,7 +519,8 @@ export async function buildScadenziarioView(
     settings: {
       coefficiente: Number(ys.coefficiente),
       impostaSostitutiva: Number(ys.impostaSostitutiva),
-      riduzione35: ys.riduzione35 === 1,
+      // Fix A2: riduzione applicata solo se attiva E comunicata a INPS.
+      riduzione35: (ys.riduzione35 === 1 && ys.riduzione35Comunicata === 1),
     },
     grossCollected,
     currentContribution,
@@ -516,6 +545,29 @@ export async function buildScadenziarioView(
   };
 
   const methodComparison = buildForfettarioMethodComparison(comparisonInput);
+
+  // Fix A1: saldo di competenza N-1 (dovuto 30/06/N) calcolato sull'anno N-1 =
+  // imposta/contributi variabili DOVUTI per N-1 (dallo storico fatture, via
+  // priorSeeds) meno gli acconti REALMENTE versati per N-1. NON si usa
+  // `scenario.taxSaldo`/`contributionSaldo` (calcolati sul reddito N).
+  //
+  // Fix re-audit MEDIO #7 — PRIMO ANNO tracciato: quando N-1 NON è tracciato,
+  // priorSeeds viene dai campi manuali `primoAnnoImpostaPrec/ContribVariabiliPrec`
+  // (importi LORDI dovuti per N-1) e NON esistono pagamenti reali di acconto
+  // _{N-1}. In quel caso gli acconti già versati per N-1 sono i campi manuali
+  // `primoAnnoAccontiImpostaPrec/ContribPrec`, altrimenti il saldo risulterebbe
+  // gonfiato dell'intero acconto già pagato. Se N-1 è tracciato usiamo i soli
+  // acconti reali (i campi primoAnno* non sono pertinenti).
+  const accontiImpostaSaldoPrec = priorSeeds.computedFromInvoices
+    ? accontiSostitutivaPagatiReali
+    : accontiSostitutivaPagatiReali + Number(ys.primoAnnoAccontiImpostaPrec ?? 0);
+  const accontiContribSaldoPrec = priorSeeds.computedFromInvoices
+    ? accontiContribPagatiReali
+    : accontiContribPagatiReali + Number(ys.primoAnnoAccontiContribPrec ?? 0);
+  const saldoPrecedente = {
+    imposta: ceil2(Math.max(priorSeeds.previousTaxBase - accontiImpostaSaldoPrec, 0)),
+    contributi: ceil2(Math.max(priorSeeds.previousContribVariabili - accontiContribSaldoPrec, 0)),
+  };
 
   // 8. pagamenti per schedule key + bollo trimestrale.
   const paymentsByKey = await loadPaymentsByKey(db, profileId);
@@ -560,6 +612,7 @@ export async function buildScadenziarioView(
     paymentsByKey,
     bolloByQuarter,
     cameraCommerce: CAMERA_COMMERCE_DEFAULT_2A,
+    saldoPrecedente,
   });
 
   // 10. warnings runtime audit (C1, A1, M1, NO_REVENUE_SOURCE).
@@ -574,6 +627,7 @@ export async function buildScadenziarioView(
       riduzione_35: ys.riduzione35,
       riduzione_35_comunicata: ys.riduzione35Comunicata,
       scadenziarioMetodo: methodSetting,
+      haRedditoDipendente: ys.haRedditoDipendente,
     },
     profile: { dataInizioAttivita },
     grossCollected,
@@ -581,6 +635,23 @@ export async function buildScadenziarioView(
   });
 
   const warnings: AuditWarning[] = [...scadOut.warnings, ...auditWarnings];
+
+  // Fix A3: fatture risultanti incassate ma senza anno di incasso determinabile
+  // (pag_anno e dataPagamento assenti) NON entrano nei ricavi → reddito
+  // sottostimato. Le segnaliamo invece di perderle silenziosamente.
+  const incassiSenzaAnno = await countIncassiSenzaAnno(db, profileId);
+  if (incassiSenzaAnno > 0) {
+    warnings.unshift({
+      code: 'A3_INCASSO_SENZA_ANNO',
+      severity: 'warning',
+      title: 'Fatture incassate senza data di incasso',
+      message:
+        `${incassiSenzaAnno} fattura/e risultano incassate ma senza anno/data di incasso: ` +
+        `NON sono conteggiate nei ricavi e il reddito potrebbe risultare sottostimato. ` +
+        `Apri ciascuna fattura e imposta la data di incasso per includerla.`,
+      context: { count: incassiSenzaAnno },
+    });
+  }
 
   // Banner "parametri stimati": lo scadenziario usa una year_settings ereditata
   // da un altro anno (vedi carry-forward al punto 1). In testa così è il primo

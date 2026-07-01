@@ -68,7 +68,9 @@ export function mapAll(ex: ExtractedData, ctx: Ctx): { rows: MappedRows; issues:
     const s = y.settings;
     return {
       profileId: pid, year: y.year, regime: ns(s['regime']) ?? 'forfettario',
-      coefficiente: pctToFrac(s['coefficiente']) ?? 0.67, impostaSostitutiva: pctToFrac(s['impostaSostitutiva']) ?? 0.15,
+      // Fix M9: `|| 0.67` (non `?? 0.67`) intercetta anche il coefficiente 0
+      // (dato legacy sporco): nessun gruppo ATECO ha coefficiente 0.
+      coefficiente: pctToFrac(s['coefficiente']) || 0.67, impostaSostitutiva: pctToFrac(s['impostaSostitutiva']) ?? 0.15,
       inpsMode: ns(s['inpsMode']) ?? 'gestione_separata', inpsCategoria: ns(s['inpsCategoria']),
       riduzione35: nb(s['riduzione35']), haRedditoDipendente: nb(s['haRedditoDipendente']),
       limiteForfettario: nn(s['limiteForfettario']) ?? 85000, scadenziarioMetodo: ns(s['scadenziarioMetodoAcconti']) ?? 'storico',
@@ -89,6 +91,12 @@ export function mapAll(ex: ExtractedData, ctx: Ctx): { rows: MappedRows; issues:
   const fatture = ex.fatture.map((f) => {
     const anno = nn(f['annoProgressivo'] ?? f['anno']) ?? 0;
     const prog = nn(f['progressivo']) ?? 0;
+    // Fix A3/M9: se pag_anno/pag_mese mancano ma la fattura ha una data di
+    // pagamento, li deriviamo da quella così l'incasso non "sparisce" dai
+    // ricavi (era la causa dei "pagamenti persi").
+    const dp = ns(f['dataPagamento']);
+    const dpAnno = dp && /^\d{4}/.test(dp) ? Number(dp.slice(0, 4)) : null;
+    const dpMese = dp && /^\d{4}-\d{2}/.test(dp) ? Number(dp.slice(5, 7)) : null;
     return {
       id: `${pid}_${ns(f['id']) ?? det('fattura', pid, anno, prog)}`, profileId: pid, clienteId: ns(f['clienteId']),
       tipoDocumento: ns(f['tipoDocumento']) ?? 'TD01', annoProgressivo: anno, progressivo: prog, numeroDisplay: `${anno}/${prog}`,
@@ -97,7 +105,7 @@ export function mapAll(ex: ExtractedData, ctx: Ctx): { rows: MappedRows; issues:
       importo: nn(f['totaleLordo'] ?? f['totaleDocument'] ?? f['totaleDocumento'] ?? f['importo']) ?? 0,
       ritenuta: nn(f['ritenuta']) ?? 0, aliquotaRitenuta: nn(f['aliquotaRitenuta']), tipoRitenuta: ns(f['tipoRitenuta']), causaleRitenuta: ns(f['causaleRitenuta']),
       contributoIntegrativo: nn(f['contributoIntegrativo']) ?? 0, marcaDaBollo: nb(f['marcaDaBollo']), bolloAddebitato: nb(f['bolloAddebitato']),
-      stato: ns(f['stato']) ?? 'bozza', dataInvioSdi: ns(f['dataInvioSdi']), dataPagamento: ns(f['dataPagamento']), pagMese: nn(f['pagMese']), pagAnno: nn(f['pagAnno']),
+      stato: ns(f['stato']) ?? 'bozza', dataInvioSdi: ns(f['dataInvioSdi']), dataPagamento: dp, pagMese: nn(f['pagMese']) ?? dpMese, pagAnno: nn(f['pagAnno']) ?? dpAnno,
       modalitaPagamento: ns(f['modalitaPagamento']), fatturaOriginaleId: f['fatturaOriginaleId'] ? `${pid}_${ns(f['fatturaOriginaleId'])}` : null, tipoStorno: ns(f['tipoStorno']),
       ncTotaleImporto: nn(f['ncTotaleImporto']) ?? 0, ncIds: f['ncIds'] ? JSON.stringify((f['ncIds'] as any[]).map((x) => `${pid}_${x}`)) : null, origine: ns(f['origine']) ?? 'manuale', note: ns(f['note']),
     };

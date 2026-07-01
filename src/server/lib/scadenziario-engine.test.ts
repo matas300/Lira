@@ -24,6 +24,7 @@ function makeScenario(over: Partial<ForfettarioScenario> = {}): ForfettarioScena
     taxableBase: 29_000,
     substituteTax: 4350,
     taxSaldo: 4350,
+    accontiSostitutivaPagatiReali: 0,
     taxAccontoBase: 4350,
     taxAcconti: { base: 4350, total: 4350, first: 2175, second: 2175, mode: 'double' },
     contributiVariabiliDovuti: 1000,
@@ -89,7 +90,7 @@ test('buildScadenziario: include tutte le 14 scheduleKey attese', () => {
     'contributi_saldo_2025', 'contributi_acc1_2026', 'contributi_acc2_2026',
     'inps_fissi_1_2026', 'inps_fissi_2_2026', 'inps_fissi_3_2026', 'inps_fissi_4_2026',
     'bollo_q12_2026', 'bollo_q3_2026', 'bollo_q4_2026',
-    'camera_2025',
+    'camera_2026',
   ]) {
     assert.ok(ids.has(k), `manca ${k}`);
   }
@@ -124,8 +125,8 @@ test('FIX A5: prorogaSaldoAt propaga su saldo, acc1, camera ma NON acc2/fissi', 
   assert.equal(map.get('contributi_saldo_2025')?.prorogaApplied, true);
   assert.equal(map.get('contributi_acc1_2026')?.dueDate, '2026-07-30');
   assert.equal(map.get('contributi_acc1_2026')?.prorogaApplied, true);
-  assert.equal(map.get('camera_2025')?.dueDate, '2026-07-30');
-  assert.equal(map.get('camera_2025')?.prorogaApplied, true);
+  assert.equal(map.get('camera_2026')?.dueDate, '2026-07-30');
+  assert.equal(map.get('camera_2026')?.prorogaApplied, true);
 
   // acc2 (30/11), fissi e bollo NON sono prorogabili
   assert.notEqual(map.get('imposta_acc2_2026')?.dueDate, '2026-07-30');
@@ -170,16 +171,28 @@ test('FIX C3: bollo_q4 (28/02/N+1) passa attraverso buildRolledDueDate', () => {
   assert.equal(bolloQ4!.dueDateRolled, true);
 });
 
-test('riduzione_35=1 → inps_fissi_1 rata fissa × 0.65 arrotondata a 2 decimali (FP-safe)', () => {
+test('riduzione_35=1 E comunicata → inps_fissi_1 rata fissa × 0.65 arrotondata a 2 decimali (FP-safe)', () => {
   // Usa year=2025 perché INPS_ARTCOM[2025] è popolata; 2026 non ancora.
   const ys = baseYearSettings();
   ys.riduzione_35 = 1;
+  ys.riduzione_35_comunicata = 1; // fix A2: la riduzione richiede la comunicazione
   const out = buildScadenziario(baseInput({ year: 2025, yearSettings: ys }));
   const fissi1 = out.rows.find((r) => r.id === 'inps_fissi_1_2025');
   assert.ok(fissi1, 'riga inps_fissi_1_2025 deve esistere');
   // 4460.64 × 0.65 / 4 = 724.854 → ceil2 = 724.86 (fix audit: niente importi
   // a 3 decimali nel calendario — non sono versabili in F24).
   assert.equal(fissi1!.amount.point, 724.86);
+});
+
+test('fix A2: riduzione_35=1 ma NON comunicata → rata fissa PIENA (nessuna riduzione)', () => {
+  const ys = baseYearSettings();
+  ys.riduzione_35 = 1;
+  ys.riduzione_35_comunicata = 0; // non comunicata → contributi pieni
+  const out = buildScadenziario(baseInput({ year: 2025, yearSettings: ys }));
+  const fissi1 = out.rows.find((r) => r.id === 'inps_fissi_1_2025');
+  assert.ok(fissi1, 'riga inps_fissi_1_2025 deve esistere');
+  // 4460.64 / 4 = 1115.16 (piena, senza il coefficiente 0.65).
+  assert.equal(fissi1!.amount.point, 1115.16);
 });
 
 test('rata fissa senza riduzione resta l\'importo F24 esatto (1115.16, fix ceil2 FP-safe)', () => {
@@ -283,7 +296,7 @@ test('scenario method=previsionale → certainty=forecast sulle righe tax/contri
   assert.equal(saldo?.certainty, 'forecast');
   // mentre bollo/camera/fissi restano official
   assert.equal(out.rows.find((r) => r.id === 'bollo_q12_2026')?.certainty, 'official');
-  assert.equal(out.rows.find((r) => r.id === 'camera_2025')?.certainty, 'official');
+  assert.equal(out.rows.find((r) => r.id === 'camera_2026')?.certainty, 'official');
 });
 
 test('inps_fissi_4 ha competenceYear=N ma due date in N+1', () => {

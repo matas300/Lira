@@ -9,7 +9,7 @@ import type { ForfettarioScenario } from './tax-engine';
 
 // Scenario sintetico coi soli campi usati dal motore dichiarazione.
 function fakeScenario(over: Partial<ForfettarioScenario> = {}): ForfettarioScenario {
-  return {
+  const s: ForfettarioScenario = {
     year: 2025, method: 'storico',
     grossCollected: 30000,
     forfettarioGrossIncome: 20100,        // 30000 × 0.67
@@ -17,6 +17,7 @@ function fakeScenario(over: Partial<ForfettarioScenario> = {}): ForfettarioScena
     taxableBase: 16100,                   // 20100 − 4000
     substituteTax: 2415,                  // 16100 × 0.15
     taxSaldo: 1415,                       // dopo 1000 di acconti reali
+    accontiSostitutivaPagatiReali: 1000,  // acconti realmente versati (LM45)
     // 6A non legge gli acconti: shape placeholder (l'AccontoPlan reale serve in 6B/RR-acconti).
     taxAccontoBase: 2415, taxAcconti: { acc1: 0, acc2: 0, total: 0 } as never,
     contributiVariabiliDovuti: 1200,
@@ -29,6 +30,12 @@ function fakeScenario(over: Partial<ForfettarioScenario> = {}): ForfettarioScena
     formula: [], explanation: [],
     ...over,
   };
+  // Se il test cambia substituteTax/taxSaldo senza indicare esplicitamente gli
+  // acconti reali, li deriviamo in modo coerente (acconti = imposta − saldo).
+  if (over.accontiSostitutivaPagatiReali === undefined) {
+    s.accontiSostitutivaPagatiReali = Math.max(0, s.substituteTax - s.taxSaldo);
+  }
+  return s;
 }
 
 test('buildQuadroLM: mappa i righi chiave dallo scenario (numerazione modello Redditi PF)', () => {
@@ -363,6 +370,23 @@ test('applyDichiarazioneOverrides: override acconti cambia il saldo', () => {
   assert.equal(a.overridden.accontiVersati, true);
   assert.equal(a.saldoEffettivo, 415);      // 2415 − 2000
   assert.equal(a.creditoDaRiportare, 0);
+});
+
+test('fix A6: sovra-acconto (acconti > imposta) → credito LM47/RX31 col.5, non troncato', () => {
+  const s = fakeScenario({ substituteTax: 2000, taxSaldo: 0, accontiSostitutivaPagatiReali: 2500 });
+  const a = applyDichiarazioneOverrides(s, {});
+  assert.equal(a.accontiVersati, 2500);       // acconti reali, NON cappati all'imposta
+  assert.equal(a.saldoEffettivo, 0);
+  assert.equal(a.creditoDaRiportare, 500);    // 2500 − 2000
+  const rx = buildQuadroRX(a);
+  assert.equal(rx.find((r) => r.key === 'RX31cred')!.value, 500);
+});
+
+test('fix M4: crediti LM40 > imposta scomputati fino a concorrenza, eccedenza NON in RX31 col.5', () => {
+  const s = fakeScenario({ accontiSostitutivaPagatiReali: 0 });
+  const a = applyDichiarazioneOverrides(s, { creditiImposta: 3000 }); // > imposta 2415
+  assert.equal(a.saldoEffettivo, 0);
+  assert.equal(a.creditoDaRiportare, 0); // l'eccedenza (585) non genera credito da riportare
 });
 
 test('applyDichiarazioneOverrides: crediti + credito anno prec riducono il saldo, eccedenza → RX4', () => {

@@ -2,7 +2,7 @@
 import { z } from 'zod';
 import {
   isValidPartitaIvaIT,
-  isValidCodiceFiscaleFormat,
+  isValidCodiceFiscale,
   isValidCodiceSdi,
   isValidPec,
 } from './validators';
@@ -243,8 +243,8 @@ function applyClienteRefines<T extends z.ZodTypeAny>(schema: T): T {
     .refine((c: any) => c.partitaIva == null || isValidPartitaIvaIT(c.partitaIva), {
       message: 'Partita IVA non valida (check-digit)', path: ['partitaIva'],
     })
-    .refine((c: any) => c.codiceFiscale == null || isValidCodiceFiscaleFormat(c.codiceFiscale), {
-      message: 'Codice fiscale: formato non valido (16 alfanumerici)', path: ['codiceFiscale'],
+    .refine((c: any) => c.codiceFiscale == null || isValidCodiceFiscale(c.codiceFiscale), {
+      message: 'Codice fiscale non valido (carattere di controllo errato → scarto SdI)', path: ['codiceFiscale'],
     })
     .refine((c: any) => c.codiceSdi == null || c.tipoCliente == null
       || isValidCodiceSdi(c.codiceSdi, c.tipoCliente), {

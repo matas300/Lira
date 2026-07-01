@@ -17,6 +17,7 @@ function scenario(over: Partial<ForfettarioScenario> = {}): ForfettarioScenario 
     taxableBase: 16100,
     substituteTax: 2415,
     taxSaldo: 2415,
+    accontiSostitutivaPagatiReali: 0,
     taxAccontoBase: 2415,
     taxAcconti: { base: 2415, total: 2415, first: 1207.5, second: 1207.5, mode: 'double' },
     contributiVariabiliDovuti: 1500,
